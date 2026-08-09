@@ -1,0 +1,39 @@
+version: "3"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  deps:
+    desc: Download and tidy Go module dependencies
+    cmds:
+      - go get github.com/go-chi/chi/v5@latest
+      - go get github.com/minio/minio-go/v7@latest
+      - go get github.com/rabbitmq/amqp091-go@latest
+      - go get github.com/golang-migrate/migrate/v4@latest
+      - go get github.com/golang-migrate/migrate/v4/database/postgres@latest
+      - go get github.com/golang-migrate/migrate/v4/source/file@latest
+      - go mod tidy
+
+  build:
+    desc: Build server and worker binaries into bin/
+    cmds:
+      - go build -o bin/server ./cmd/server
+      - go build -o bin/worker ./cmd/worker
+
+  test:
+    desc: Run all Go tests
+    cmds:
+      - go test ./...
+
+  run-server:
+    desc: Run HTTP server
+    cmds:
+      - go run ./cmd/server
+
+  run-worker:
+    desc: Run background worker
+    cmds:
+      - go run ./cmd/worker
