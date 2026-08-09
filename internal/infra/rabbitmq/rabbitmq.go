@@ -16,7 +16,7 @@ func Connect(cfg config.RabbitMQConfig) (*amqp.Connection, error) {
 	return conn, nil
 }
 
-// DeclareExchange ensures the avatars topic exchange exists.
+// DeclareExchange ensures exchange and queues used by the service exist.
 func DeclareExchange(cfg config.RabbitMQConfig) error {
 	conn, err := Connect(cfg)
 	if err != nil {
@@ -30,17 +30,5 @@ func DeclareExchange(cfg config.RabbitMQConfig) error {
 	}
 	defer ch.Close()
 
-	if err := ch.ExchangeDeclare(
-		cfg.Exchange,
-		"topic",
-		true,  // durable
-		false, // auto-deleted
-		false, // internal
-		false, // no-wait
-		nil,
-	); err != nil {
-		return fmt.Errorf("declare exchange %q: %w", cfg.Exchange, err)
-	}
-
-	return nil
+	return declareTopology(ch, cfg.Exchange)
 }

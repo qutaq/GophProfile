@@ -1,6 +1,7 @@
 bin/
 .bin/
 dist/
+
 vendor/
 *.exe
 *.test

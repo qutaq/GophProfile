@@ -1,13 +1,22 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-
+	"github.com/qutaq/GophProfile/internal/api"
 	"github.com/qutaq/GophProfile/internal/config"
+	"github.com/qutaq/GophProfile/internal/handlers"
+	"github.com/qutaq/GophProfile/internal/infra/postgres"
+	"github.com/qutaq/GophProfile/internal/infra/rabbitmq"
+	infras3 "github.com/qutaq/GophProfile/internal/infra/s3"
+	"github.com/qutaq/GophProfile/internal/repository"
+	"github.com/qutaq/GophProfile/internal/services"
 )
 
 func main() {
@@ -16,33 +25,76 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	db, err := postgres.Open(cfg.DB)
+	if err != nil {
+		log.Fatalf("connect postgres: %v", err)
+	}
+	defer db.Close()
 
-	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	s3Client, err := infras3.NewClient(cfg.S3)
+	if err != nil {
+		log.Fatalf("create s3 client: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := infras3.EnsureBucket(ctx, s3Client, cfg.S3.Bucket); err != nil {
+		log.Fatalf("ensure bucket: %v", err)
+	}
+
+	publisher, err := rabbitmq.NewPublisher(rabbitmq.Config{
+		URL:      cfg.RabbitMQ.URL,
+		Exchange: cfg.RabbitMQ.Exchange,
 	})
+	if err != nil {
+		log.Fatalf("rabbitmq publisher: %v", err)
+	}
+	defer publisher.Close()
 
-	log.Printf("%s server starting on %s (env=%s)", cfg.App.Name, cfg.HTTP.Addr, cfg.App.Env)
-	log.Printf("deps: db=%s:%d/%s s3=%s/%s rabbitmq_exchange=%s",
-		cfg.DB.Host, cfg.DB.Port, cfg.DB.Name,
-		cfg.S3.Endpoint, cfg.S3.Bucket,
-		cfg.RabbitMQ.Exchange,
-	)
+	avatarRepo := repository.NewAvatarRepository(db)
+	storage := repository.NewS3Storage(s3Client, cfg.S3.Bucket)
+	avatarSvc := services.NewAvatarService(avatarRepo, storage, publisher, cfg.Upload.MaxSizeBytes)
+
+	webHandler, err := handlers.NewWebHandler(avatarSvc, "web")
+	if err != nil {
+		log.Fatalf("load web templates: %v", err)
+	}
+
+	router := api.NewRouter(api.Handlers{
+		Avatars: handlers.NewAvatarHandler(avatarSvc),
+		Health: handlers.NewHealthHandler(handlers.HealthDeps{
+			DB:        db,
+			S3:        s3Client,
+			S3Bucket:  cfg.S3.Bucket,
+			RabbitURL: cfg.RabbitMQ.URL,
+		}),
+		Web:    webHandler,
+		WebDir: "web",
+	})
 
 	server := &http.Server{
 		Addr:         cfg.HTTP.Addr,
-		Handler:      r,
+		Handler:      router,
 		ReadTimeout:  cfg.HTTP.ReadTimeout,
 		WriteTimeout: cfg.HTTP.WriteTimeout,
 	}
 
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("server: %v", err)
+	go func() {
+		log.Printf("%s server starting on %s (env=%s)", cfg.App.Name, cfg.HTTP.Addr, cfg.App.Env)
+		log.Printf("web UI: http://localhost%s/web/upload", cfg.HTTP.Addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server: %v", err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown: %v", err)
 	}
+	log.Println("server stopped")
 }

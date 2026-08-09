@@ -1,0 +1,36 @@
+run:
+  timeout: 3m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - misspell
+    - unconvert
+    - bodyclose
+
+linters-settings:
+  misspell:
+    locale: US
+  errcheck:
+    exclude-functions:
+      - (*database/sql.Rows).Close
+      - (*os.File).Close
+      - encoding/json.Marshal
+      - io.Copy
+
+issues:
+  exclude-dirs:
+    - bin
+    - vendor
+    - web
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - bodyclose
+        - errcheck

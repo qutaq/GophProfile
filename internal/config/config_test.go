@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -80,5 +81,76 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.RabbitMQ.Exchange != "custom.exchange" {
 		t.Errorf("RabbitMQ.Exchange = %q, want custom.exchange", cfg.RabbitMQ.Exchange)
+	}
+}
+
+func TestLoadBoolDurationAndInvalidNumbers(t *testing.T) {
+	t.Setenv("S3_USE_SSL", "true")
+	t.Setenv("HTTP_READ_TIMEOUT", "30s")
+	t.Setenv("HTTP_WRITE_TIMEOUT", "not-a-duration")
+	t.Setenv("DB_PORT", "not-int")
+	t.Setenv("UPLOAD_MAX_SIZE_BYTES", "not-int64")
+	t.Setenv("S3_USE_SSL", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if !cfg.S3.UseSSL {
+		t.Fatal("S3.UseSSL want true")
+	}
+	if cfg.HTTP.ReadTimeout != 30*time.Second {
+		t.Fatalf("ReadTimeout = %v", cfg.HTTP.ReadTimeout)
+	}
+	if cfg.HTTP.WriteTimeout != 15*time.Second {
+		t.Fatalf("WriteTimeout fallback = %v", cfg.HTTP.WriteTimeout)
+	}
+	if cfg.DB.Port != 5432 {
+		t.Fatalf("DB.Port fallback = %d", cfg.DB.Port)
+	}
+	if cfg.Upload.MaxSizeBytes != 10*1024*1024 {
+		t.Fatalf("MaxSizeBytes fallback = %d", cfg.Upload.MaxSizeBytes)
+	}
+
+	t.Setenv("S3_USE_SSL", "not-bool")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.S3.UseSSL {
+		t.Fatal("S3.UseSSL want false fallback")
+	}
+}
+
+func TestValidateErrors(t *testing.T) {
+	cfg := &Config{
+		HTTP:     HTTPConfig{Addr: ":8080"},
+		DB:       DBConfig{Host: "h", Name: "n", User: "u"},
+		S3:       S3Config{Endpoint: "e", Bucket: "b"},
+		RabbitMQ: RabbitMQConfig{URL: "amqp://x", Exchange: "ex"},
+		Upload:   UploadConfig{MaxSizeBytes: 1},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid config: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		mut  func(*Config)
+	}{
+		{"http", func(c *Config) { c.HTTP.Addr = "" }},
+		{"db", func(c *Config) { c.DB.Host = "" }},
+		{"s3", func(c *Config) { c.S3.Bucket = "" }},
+		{"rabbit", func(c *Config) { c.RabbitMQ.URL = "" }},
+		{"upload", func(c *Config) { c.Upload.MaxSizeBytes = 0 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cp := *cfg
+			tc.mut(&cp)
+			if err := cp.Validate(); err == nil {
+				t.Fatal("expected error")
+			}
+		})
 	}
 }
