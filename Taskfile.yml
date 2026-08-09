@@ -37,3 +37,43 @@ tasks:
     desc: Run background worker
     cmds:
       - go run ./cmd/worker
+
+  up:
+    desc: Start local infra (Postgres, MinIO, RabbitMQ)
+    cmds:
+      - docker compose up -d
+
+  down:
+    desc: Stop local infra
+    cmds:
+      - docker compose down
+
+  migrate:
+    desc: Apply database migrations
+    cmds:
+      - go run ./cmd/migrate -direction=up
+
+  migrate:down:
+    desc: Roll back the last database migration
+    cmds:
+      - go run ./cmd/migrate -direction=down
+
+  migrate:version:
+    desc: Show current migration version
+    cmds:
+      - go run ./cmd/migrate -direction=version
+
+  check:
+    desc: Check Postgres, MinIO and RabbitMQ connectivity
+    cmds:
+      - go run ./cmd/check
+
+  infra:
+    desc: Start infra, apply migrations and verify connections
+    cmds:
+      - task: up
+      - |
+        {{if eq OS "windows"}}powershell -Command "Start-Sleep -Seconds 8"{{else}}sleep 8{{end}}
+      - task: migrate
+      - task: check
+
