@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 	"os/signal"
 	"syscall"
 
@@ -46,8 +45,8 @@ func main() {
 	storage := repository.NewS3Storage(s3Client, cfg.S3.Bucket)
 	w := worker.New(avatarRepo, storage)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	if err := consumer.Consume(ctx, events.QueueUpload, w.HandleUpload); err != nil {
 		log.Fatalf("consume upload queue: %v", err)
@@ -58,10 +57,6 @@ func main() {
 
 	log.Printf("%s worker started (env=%s exchange=%s)", cfg.App.Name, cfg.App.Env, cfg.RabbitMQ.Exchange)
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-
-	cancel()
+	<-ctx.Done()
 	log.Println("worker stopped")
 }
