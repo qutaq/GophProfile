@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -16,7 +16,8 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		slog.Error("load config", "err", err)
+		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -25,24 +26,31 @@ func main() {
 	failed := false
 
 	if err := checkPostgres(ctx, cfg); err != nil {
-		log.Printf("postgres: FAIL (%v)", err)
+		slog.Error("postgres check failed", "err", err)
 		failed = true
 	} else {
-		log.Printf("postgres: OK (%s:%d/%s)", cfg.DB.Host, cfg.DB.Port, cfg.DB.Name)
+		slog.Info("postgres check ok",
+			"host", cfg.DB.Host,
+			"port", cfg.DB.Port,
+			"db", cfg.DB.Name,
+		)
 	}
 
 	if err := checkS3(ctx, cfg); err != nil {
-		log.Printf("minio: FAIL (%v)", err)
+		slog.Error("minio check failed", "err", err)
 		failed = true
 	} else {
-		log.Printf("minio: OK (endpoint=%s bucket=%s)", cfg.S3.Endpoint, cfg.S3.Bucket)
+		slog.Info("minio check ok",
+			"endpoint", cfg.S3.Endpoint,
+			"bucket", cfg.S3.Bucket,
+		)
 	}
 
 	if err := checkRabbitMQ(cfg); err != nil {
-		log.Printf("rabbitmq: FAIL (%v)", err)
+		slog.Error("rabbitmq check failed", "err", err)
 		failed = true
 	} else {
-		log.Printf("rabbitmq: OK (exchange=%s)", cfg.RabbitMQ.Exchange)
+		slog.Info("rabbitmq check ok", "exchange", cfg.RabbitMQ.Exchange)
 	}
 
 	if failed {

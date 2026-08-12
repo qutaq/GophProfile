@@ -1,28 +1,34 @@
 package config
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestLoadDefaults(t *testing.T) {
-	t.Setenv("APP_ENV", "")
-	t.Setenv("HTTP_ADDR", "")
-	t.Setenv("DB_HOST", "")
-	t.Setenv("DB_PORT", "")
-	t.Setenv("DB_USER", "")
-	t.Setenv("DB_PASSWORD", "")
-	t.Setenv("DB_NAME", "")
-	t.Setenv("DB_SSLMODE", "")
-	t.Setenv("S3_ENDPOINT", "")
-	t.Setenv("S3_ACCESS_KEY", "")
-	t.Setenv("S3_SECRET_KEY", "")
-	t.Setenv("S3_BUCKET", "")
-	t.Setenv("S3_USE_SSL", "")
-	t.Setenv("S3_REGION", "")
-	t.Setenv("RABBITMQ_URL", "")
-	t.Setenv("RABBITMQ_EXCHANGE", "")
-	t.Setenv("UPLOAD_MAX_SIZE_BYTES", "")
+	unsetenv(t,
+		"APP_ENV",
+		"HTTP_ADDR",
+		"HTTP_READ_TIMEOUT",
+		"HTTP_WRITE_TIMEOUT",
+		"DB_HOST",
+		"DB_PORT",
+		"DB_USER",
+		"DB_PASSWORD",
+		"DB_NAME",
+		"DB_SSLMODE",
+		"S3_ENDPOINT",
+		"S3_ACCESS_KEY",
+		"S3_SECRET_KEY",
+		"S3_BUCKET",
+		"S3_USE_SSL",
+		"S3_REGION",
+		"RABBITMQ_URL",
+		"RABBITMQ_EXCHANGE",
+		"UPLOAD_MAX_SIZE_BYTES",
+	)
 
 	cfg, err := Load()
 	if err != nil {
@@ -84,13 +90,10 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 }
 
-func TestLoadBoolDurationAndInvalidNumbers(t *testing.T) {
+func TestLoadBoolAndDuration(t *testing.T) {
 	t.Setenv("S3_USE_SSL", "true")
 	t.Setenv("HTTP_READ_TIMEOUT", "30s")
-	t.Setenv("HTTP_WRITE_TIMEOUT", "not-a-duration")
-	t.Setenv("DB_PORT", "not-int")
-	t.Setenv("UPLOAD_MAX_SIZE_BYTES", "not-int64")
-	t.Setenv("S3_USE_SSL", "true")
+	unsetenv(t, "HTTP_WRITE_TIMEOUT", "DB_PORT", "UPLOAD_MAX_SIZE_BYTES")
 
 	cfg, err := Load()
 	if err != nil {
@@ -103,22 +106,42 @@ func TestLoadBoolDurationAndInvalidNumbers(t *testing.T) {
 		t.Fatalf("ReadTimeout = %v", cfg.HTTP.ReadTimeout)
 	}
 	if cfg.HTTP.WriteTimeout != 15*time.Second {
-		t.Fatalf("WriteTimeout fallback = %v", cfg.HTTP.WriteTimeout)
+		t.Fatalf("WriteTimeout = %v, want default 15s", cfg.HTTP.WriteTimeout)
 	}
-	if cfg.DB.Port != 5432 {
-		t.Fatalf("DB.Port fallback = %d", cfg.DB.Port)
-	}
-	if cfg.Upload.MaxSizeBytes != 10*1024*1024 {
-		t.Fatalf("MaxSizeBytes fallback = %d", cfg.Upload.MaxSizeBytes)
+}
+
+func TestLoadInvalidValuesFailEarly(t *testing.T) {
+	cases := []struct {
+		key   string
+		value string
+		want  string
+	}{
+		{"HTTP_WRITE_TIMEOUT", "not-a-duration", "HTTP_WRITE_TIMEOUT"},
+		{"DB_PORT", "not-int", "DB_PORT"},
+		{"UPLOAD_MAX_SIZE_BYTES", "not-int64", "UPLOAD_MAX_SIZE_BYTES"},
+		{"S3_USE_SSL", "not-bool", "S3_USE_SSL"},
 	}
 
-	t.Setenv("S3_USE_SSL", "not-bool")
-	cfg, err = Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-	if cfg.S3.UseSSL {
-		t.Fatal("S3.UseSSL want false fallback")
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			// Ensure unrelated parseable fields use defaults.
+			unsetenv(t,
+				"HTTP_READ_TIMEOUT",
+				"HTTP_WRITE_TIMEOUT",
+				"DB_PORT",
+				"UPLOAD_MAX_SIZE_BYTES",
+				"S3_USE_SSL",
+			)
+			t.Setenv(tc.key, tc.value)
+
+			_, err := Load()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q, want substring %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -151,6 +174,24 @@ func TestValidateErrors(t *testing.T) {
 			if err := cp.Validate(); err == nil {
 				t.Fatal("expected error")
 			}
+		})
+	}
+}
+
+func unsetenv(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		prev, had := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unsetenv %s: %v", key, err)
+		}
+		k, v, ok := key, prev, had
+		t.Cleanup(func() {
+			if ok {
+				_ = os.Setenv(k, v)
+				return
+			}
+			_ = os.Unsetenv(k)
 		})
 	}
 }

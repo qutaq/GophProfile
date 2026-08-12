@@ -3,7 +3,7 @@ package rabbitmq
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -63,21 +63,18 @@ func (c *Consumer) Consume(ctx context.Context, queue string, handler MessageHan
 		return fmt.Errorf("consume %s: %w", queue, err)
 	}
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case d, ok := <-deliveries:
-				if !ok {
-					return
-				}
-				c.handleDelivery(ctx, d, handler)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case d, ok := <-deliveries:
+			if !ok {
+				return nil
 			}
+			// Finish the in-flight message even after shutdown is requested.
+			c.handleDelivery(context.WithoutCancel(ctx), d, handler)
 		}
-	}()
-
-	return nil
+	}
 }
 
 const maxRetries = 5
@@ -92,7 +89,7 @@ func (c *Consumer) handleDelivery(ctx context.Context, d amqp.Delivery, handler 
 		return handler(ctx, d.Body, msgID)
 	})
 	if err != nil {
-		log.Printf("message %s failed after retries: %v", msgID, err)
+		slog.Error("message failed after retries", "message_id", msgID, "err", err)
 		_ = d.Nack(false, false)
 		return
 	}
@@ -109,7 +106,12 @@ func retryWithBackoff(ctx context.Context, attempts int, fn func() error) error 
 			break
 		}
 		backoff := time.Duration(1<<uint(i)) * 200 * time.Millisecond
-		log.Printf("retry %d/%d after %s: %v", i+1, attempts, backoff, err)
+		slog.Warn("retrying message handler",
+			"attempt", i+1,
+			"max_attempts", attempts,
+			"backoff", backoff.String(),
+			"err", err,
+		)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

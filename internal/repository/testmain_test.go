@@ -2,11 +2,11 @@ package repository_test
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 
 	"github.com/qutaq/GophProfile/internal/config"
@@ -15,7 +15,7 @@ import (
 	infras3 "github.com/qutaq/GophProfile/internal/infra/s3"
 )
 
-func openTestDB(t *testing.T) *sql.DB {
+func openTestDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
 	cfg, err := config.Load()
@@ -30,17 +30,17 @@ func openTestDB(t *testing.T) *sql.DB {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
+	if err := db.Ping(ctx); err != nil {
+		db.Close()
 		t.Skipf("postgres ping failed, skip integration test: %v", err)
 	}
 
 	if err := migrate.Up(cfg.DB.DSN()); err != nil {
-		_ = db.Close()
+		db.Close()
 		t.Fatalf("migrate up: %v", err)
 	}
 
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() { db.Close() })
 	return db
 }
 
@@ -71,9 +71,9 @@ func openTestS3(t *testing.T) (*minio.Client, string) {
 	return client, cfg.S3.Bucket
 }
 
-func cleanupUserAvatars(t *testing.T, db *sql.DB, userID string) {
+func cleanupUserAvatars(t *testing.T, db *pgxpool.Pool, userID string) {
 	t.Helper()
-	_, err := db.Exec(`DELETE FROM avatars WHERE user_id = $1`, userID)
+	_, err := db.Exec(context.Background(), `DELETE FROM avatars WHERE user_id = $1`, userID)
 	if err != nil {
 		t.Fatalf("cleanup avatars: %v", err)
 	}

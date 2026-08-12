@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/qutaq/GophProfile/internal/config"
@@ -16,28 +16,33 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		slog.Error("load config", "err", err)
+		os.Exit(1)
 	}
 
 	switch *direction {
 	case "up":
 		if err := migrate.Up(cfg.DB.DSN()); err != nil {
-			log.Fatalf("migrate up: %v", err)
+			slog.Error("migrate up", "err", err)
+			os.Exit(1)
 		}
-		log.Println("migrations applied")
+		slog.Info("migrations applied")
 	case "down":
 		if err := migrate.Down(cfg.DB.DSN()); err != nil {
-			log.Fatalf("migrate down: %v", err)
+			slog.Error("migrate down", "err", err)
+			os.Exit(1)
 		}
-		log.Println("last migration rolled back")
+		slog.Info("last migration rolled back")
 	case "version":
 		version, dirty, err := migrate.Version(cfg.DB.DSN())
 		if err != nil {
-			log.Fatalf("migrate version: %v", err)
+			slog.Error("migrate version", "err", err)
+			os.Exit(1)
 		}
 		fmt.Printf("version=%d dirty=%v\n", version, dirty)
 	default:
-		log.Fatalf("unknown direction %q (use up|down|version)", *direction)
+		slog.Error("unknown migration direction", "direction", *direction)
+		os.Exit(1)
 	}
 
 	os.Exit(0)

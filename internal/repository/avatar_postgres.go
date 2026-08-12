@@ -2,23 +2,24 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qutaq/GophProfile/internal/domain"
 )
 
 type AvatarRepository struct {
-	db *sql.DB
+	db *pgxpool.Pool
 }
 
-func NewAvatarRepository(db *sql.DB) *AvatarRepository {
+func NewAvatarRepository(db *pgxpool.Pool) *AvatarRepository {
 	return &AvatarRepository{db: db}
 }
 
@@ -48,7 +49,7 @@ func (r *AvatarRepository) Create(ctx context.Context, avatar *domain.Avatar) er
 	}
 	avatar.UpdatedAt = now
 
-	_, err = r.db.ExecContext(
+	_, err = r.db.Exec(
 		ctx, q,
 		avatar.ID,
 		avatar.UserID,
@@ -63,8 +64,8 @@ func (r *AvatarRepository) Create(ctx context.Context, avatar *domain.Avatar) er
 		avatar.UpdatedAt,
 	)
 	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return domain.ErrConflict
 		}
 		return fmt.Errorf("insert avatar: %w", err)
@@ -107,7 +108,7 @@ func (r *AvatarRepository) ListByUserID(ctx context.Context, userID string) ([]d
 		ORDER BY created_at DESC
 	`
 
-	rows, err := r.db.QueryContext(ctx, q, userID)
+	rows, err := r.db.Query(ctx, q, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list avatars: %w", err)
 	}
@@ -128,37 +129,44 @@ func (r *AvatarRepository) ListByUserID(ctx context.Context, userID string) ([]d
 }
 
 func (r *AvatarRepository) SoftDelete(ctx context.Context, id, userID string) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin soft delete: %w", err)
+	}
+	// Rollback is a no-op if Commit succeeded.
+	defer tx.Rollback(ctx)
+
 	const q = `
 		UPDATE avatars
 		SET deleted_at = NOW(), updated_at = NOW()
 		WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
 	`
 
-	res, err := r.db.ExecContext(ctx, q, id, userID)
+	tag, err := tx.Exec(ctx, q, id, userID)
 	if err != nil {
 		return fmt.Errorf("soft delete avatar: %w", err)
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("rows affected: %w", err)
-	}
-	if affected == 0 {
-		var deletedAt sql.NullTime
-		err := r.db.QueryRowContext(
+	if tag.RowsAffected() == 0 {
+		var deletedAt *time.Time
+		err := tx.QueryRow(
 			ctx,
 			`SELECT deleted_at FROM avatars WHERE id = $1 AND user_id = $2`,
 			id, userID,
 		).Scan(&deletedAt)
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("lookup avatar for delete: %w", err)
 		}
-		if deletedAt.Valid {
+		if deletedAt != nil {
 			return domain.ErrAlreadyDeleted
 		}
 		return domain.ErrNotFound
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit soft delete: %w", err)
 	}
 	return nil
 }
@@ -199,24 +207,20 @@ func (r *AvatarRepository) UpdateThumbnails(ctx context.Context, id string, keys
 }
 
 func (r *AvatarRepository) execAffectingOne(ctx context.Context, q string, args ...any) error {
-	res, err := r.db.ExecContext(ctx, q, args...)
+	tag, err := r.db.Exec(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("update avatar: %w", err)
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("rows affected: %w", err)
-	}
-	if affected == 0 {
+	if tag.RowsAffected() == 0 {
 		return domain.ErrNotFound
 	}
 	return nil
 }
 
 func (r *AvatarRepository) scanOne(ctx context.Context, q string, args ...any) (*domain.Avatar, error) {
-	row := r.db.QueryRowContext(ctx, q, args...)
+	row := r.db.QueryRow(ctx, q, args...)
 	avatar, err := scanAvatar(row)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
@@ -233,7 +237,7 @@ func scanAvatar(row scannable) (*domain.Avatar, error) {
 	var (
 		avatar     domain.Avatar
 		thumbsRaw  []byte
-		deletedAt  sql.NullTime
+		deletedAt  *time.Time
 		upload     string
 		processing string
 	)
@@ -264,8 +268,8 @@ func scanAvatar(row scannable) (*domain.Avatar, error) {
 			return nil, fmt.Errorf("unmarshal thumbnails: %w", err)
 		}
 	}
-	if deletedAt.Valid {
-		t := deletedAt.Time.UTC()
+	if deletedAt != nil {
+		t := deletedAt.UTC()
 		avatar.DeletedAt = &t
 	}
 	avatar.CreatedAt = avatar.CreatedAt.UTC()

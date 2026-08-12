@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 
 	"github.com/qutaq/GophProfile/internal/domain"
 	"github.com/qutaq/GophProfile/internal/events"
@@ -41,11 +41,11 @@ func (w *Worker) HandleUpload(ctx context.Context, body []byte, messageID string
 	if err := json.Unmarshal(body, &event); err != nil {
 		return fmt.Errorf("unmarshal upload event: %w", err)
 	}
-	log.Printf("handle upload message=%s avatar=%s", messageID, event.AvatarID)
+	slog.Info("handle upload", "message_id", messageID, "avatar_id", event.AvatarID)
 
 	avatar, err := w.repo.GetByID(ctx, event.AvatarID)
 	if errors.Is(err, domain.ErrNotFound) {
-		log.Printf("avatar %s not found, skip", event.AvatarID)
+		slog.Info("avatar not found, skip", "avatar_id", event.AvatarID)
 		return nil
 	}
 	if err != nil {
@@ -53,7 +53,7 @@ func (w *Worker) HandleUpload(ctx context.Context, body []byte, messageID string
 	}
 
 	if avatar.ProcessingStatus == domain.ProcessingStatusCompleted && len(avatar.ThumbnailS3Keys) > 0 {
-		log.Printf("avatar %s already processed, skip", event.AvatarID)
+		slog.Info("avatar already processed, skip", "avatar_id", event.AvatarID)
 		return nil
 	}
 
@@ -105,7 +105,7 @@ func (w *Worker) HandleUpload(ctx context.Context, body []byte, messageID string
 		return err
 	}
 
-	log.Printf("avatar %s processing completed", event.AvatarID)
+	slog.Info("avatar processing completed", "avatar_id", event.AvatarID)
 	return nil
 }
 
@@ -114,7 +114,11 @@ func (w *Worker) HandleDelete(ctx context.Context, body []byte, messageID string
 	if err := json.Unmarshal(body, &event); err != nil {
 		return fmt.Errorf("unmarshal delete event: %w", err)
 	}
-	log.Printf("handle delete message=%s avatar=%s keys=%d", messageID, event.AvatarID, len(event.S3Keys))
+	slog.Info("handle delete",
+		"message_id", messageID,
+		"avatar_id", event.AvatarID,
+		"keys", len(event.S3Keys),
+	)
 
 	if err := w.storage.Delete(ctx, event.S3Keys...); err != nil {
 		return fmt.Errorf("delete s3 objects: %w", err)

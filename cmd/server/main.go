@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -21,24 +22,28 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		slog.Error("load config", "err", err)
+		os.Exit(1)
 	}
 
 	db, err := postgres.Open(cfg.DB)
 	if err != nil {
-		log.Fatalf("connect postgres: %v", err)
+		slog.Error("connect postgres", "err", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
 	s3Client, err := infras3.NewClient(cfg.S3)
 	if err != nil {
-		log.Fatalf("create s3 client: %v", err)
+		slog.Error("create s3 client", "err", err)
+		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := infras3.EnsureBucket(ctx, s3Client, cfg.S3.Bucket); err != nil {
-		log.Fatalf("ensure bucket: %v", err)
+		slog.Error("ensure bucket", "err", err)
+		os.Exit(1)
 	}
 
 	publisher, err := rabbitmq.NewPublisher(rabbitmq.Config{
@@ -46,7 +51,8 @@ func main() {
 		Exchange: cfg.RabbitMQ.Exchange,
 	})
 	if err != nil {
-		log.Fatalf("rabbitmq publisher: %v", err)
+		slog.Error("rabbitmq publisher", "err", err)
+		os.Exit(1)
 	}
 	defer publisher.Close()
 
@@ -56,19 +62,23 @@ func main() {
 
 	webHandler, err := handlers.NewWebHandler(avatarSvc, "web")
 	if err != nil {
-		log.Fatalf("load web templates: %v", err)
+		slog.Error("load web templates", "err", err)
+		os.Exit(1)
 	}
+
+	healthHandler := handlers.NewHealthHandler(handlers.HealthDeps{
+		DB:        db,
+		S3:        s3Client,
+		S3Bucket:  cfg.S3.Bucket,
+		RabbitURL: cfg.RabbitMQ.URL,
+	})
+	defer healthHandler.Close()
 
 	router := api.NewRouter(api.Handlers{
 		Avatars: handlers.NewAvatarHandler(avatarSvc),
-		Health: handlers.NewHealthHandler(handlers.HealthDeps{
-			DB:        db,
-			S3:        s3Client,
-			S3Bucket:  cfg.S3.Bucket,
-			RabbitURL: cfg.RabbitMQ.URL,
-		}),
-		Web:    webHandler,
-		WebDir: "web",
+		Health:  healthHandler,
+		Web:     webHandler,
+		WebDir:  "web",
 	})
 
 	server := &http.Server{
@@ -79,10 +89,15 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("%s server starting on %s (env=%s)", cfg.App.Name, cfg.HTTP.Addr, cfg.App.Env)
-		log.Printf("web UI: http://localhost%s/web/upload", cfg.HTTP.Addr)
+		slog.Info("server starting",
+			"app", cfg.App.Name,
+			"addr", cfg.HTTP.Addr,
+			"env", cfg.App.Env,
+		)
+		slog.Info("web UI available", "url", "http://localhost"+cfg.HTTP.Addr+"/web/upload")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server: %v", err)
+			slog.Error("server failed", "err", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -93,7 +108,7 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown: %v", err)
+		slog.Error("shutdown", "err", err)
 	}
-	log.Println("server stopped")
+	slog.Info("server stopped")
 }

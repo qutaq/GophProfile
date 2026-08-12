@@ -64,6 +64,27 @@ type UploadConfig struct {
 
 // Load reads configuration from environment variables and applies defaults.
 func Load() (*Config, error) {
+	readTimeout, err := getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	writeTimeout, err := getEnvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	dbPort, err := getEnvInt("DB_PORT", 5432)
+	if err != nil {
+		return nil, err
+	}
+	useSSL, err := getEnvBool("S3_USE_SSL", false)
+	if err != nil {
+		return nil, err
+	}
+	maxSizeBytes, err := getEnvInt64("UPLOAD_MAX_SIZE_BYTES", 10*1024*1024)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		App: AppConfig{
 			Env:  getEnv("APP_ENV", "development"),
@@ -71,12 +92,12 @@ func Load() (*Config, error) {
 		},
 		HTTP: HTTPConfig{
 			Addr:         getEnv("HTTP_ADDR", ":8080"),
-			ReadTimeout:  getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second),
-			WriteTimeout: getEnvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second),
+			ReadTimeout:  readTimeout,
+			WriteTimeout: writeTimeout,
 		},
 		DB: DBConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
-			Port:     getEnvInt("DB_PORT", 5432),
+			Port:     dbPort,
 			User:     getEnv("DB_USER", "gophprofile"),
 			Password: getEnv("DB_PASSWORD", "gophprofile"),
 			Name:     getEnv("DB_NAME", "gophprofile"),
@@ -87,7 +108,7 @@ func Load() (*Config, error) {
 			AccessKeyID:     getEnv("S3_ACCESS_KEY", "minioadmin"),
 			SecretAccessKey: getEnv("S3_SECRET_KEY", "minioadmin"),
 			Bucket:          getEnv("S3_BUCKET", "avatars"),
-			UseSSL:          getEnvBool("S3_USE_SSL", false),
+			UseSSL:          useSSL,
 			Region:          getEnv("S3_REGION", "us-east-1"),
 		},
 		RabbitMQ: RabbitMQConfig{
@@ -95,7 +116,7 @@ func Load() (*Config, error) {
 			Exchange: getEnv("RABBITMQ_EXCHANGE", "avatars.exchange"),
 		},
 		Upload: UploadConfig{
-			MaxSizeBytes: getEnvInt64("UPLOAD_MAX_SIZE_BYTES", 10*1024*1024),
+			MaxSizeBytes: maxSizeBytes,
 		},
 	}
 
@@ -126,56 +147,56 @@ func (c *Config) Validate() error {
 }
 
 func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
+	if v, ok := os.LookupEnv(key); ok {
 		return v
 	}
 	return fallback
 }
 
-func getEnvInt(key string, fallback int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
+func getEnvInt(key string, fallback int) (int, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback, nil
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("invalid %s=%q: %w", key, v, err)
 	}
-	return n
+	return n, nil
 }
 
-func getEnvInt64(key string, fallback int64) int64 {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
+func getEnvInt64(key string, fallback int64) (int64, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback, nil
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("invalid %s=%q: %w", key, v, err)
 	}
-	return n
+	return n, nil
 }
 
-func getEnvBool(key string, fallback bool) bool {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
+func getEnvBool(key string, fallback bool) (bool, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback, nil
 	}
 	b, err := strconv.ParseBool(v)
 	if err != nil {
-		return fallback
+		return false, fmt.Errorf("invalid %s=%q: %w", key, v, err)
 	}
-	return b
+	return b, nil
 }
 
-func getEnvDuration(key string, fallback time.Duration) time.Duration {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
+func getEnvDuration(key string, fallback time.Duration) (time.Duration, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback, nil
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("invalid %s=%q: %w", key, v, err)
 	}
-	return d
+	return d, nil
 }

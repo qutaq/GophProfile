@@ -3,9 +3,11 @@ package migrate
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
 	appmigrations "github.com/qutaq/GophProfile/migrations"
@@ -60,19 +62,30 @@ func newMigrator(databaseURL string) (*migrate.Migrate, error) {
 		return nil, fmt.Errorf("create iofs source: %w", err)
 	}
 
-	m, err := migrate.NewWithSourceInstance("iofs", source, databaseURL)
+	m, err := migrate.NewWithSourceInstance("iofs", source, toPgx5URL(databaseURL))
 	if err != nil {
 		return nil, fmt.Errorf("create migrator: %w", err)
 	}
 	return m, nil
 }
 
+func toPgx5URL(databaseURL string) string {
+	switch {
+	case strings.HasPrefix(databaseURL, "postgres://"):
+		return "pgx5://" + strings.TrimPrefix(databaseURL, "postgres://")
+	case strings.HasPrefix(databaseURL, "postgresql://"):
+		return "pgx5://" + strings.TrimPrefix(databaseURL, "postgresql://")
+	default:
+		return databaseURL
+	}
+}
+
 func closeMigrator(m *migrate.Migrate) {
 	srcErr, dbErr := m.Close()
 	if srcErr != nil {
-		fmt.Printf("migrate source close: %v\n", srcErr)
+		slog.Error("migrate source close", "err", srcErr)
 	}
 	if dbErr != nil {
-		fmt.Printf("migrate db close: %v\n", dbErr)
+		slog.Error("migrate db close", "err", dbErr)
 	}
 }

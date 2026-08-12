@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -121,7 +121,7 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (*UploadResu
 		UserID:   in.UserID,
 		S3Key:    s3Key,
 	}); err != nil {
-		log.Printf("publish upload event for %s: %v", avatarID, err)
+		slog.Error("publish upload event", "avatar_id", avatarID, "err", err)
 	}
 
 	return &UploadResult{
@@ -219,7 +219,7 @@ func (s *AvatarService) Delete(ctx context.Context, avatarID, userID string) err
 		AvatarID: avatarID,
 		S3Keys:   keys,
 	}); err != nil {
-		log.Printf("publish delete event for %s: %v", avatarID, err)
+		slog.Error("publish delete event", "avatar_id", avatarID, "err", err)
 	}
 	return nil
 }

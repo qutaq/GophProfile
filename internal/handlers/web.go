@@ -13,11 +13,11 @@ import (
 )
 
 type WebHandler struct {
-	svc       *services.AvatarService
+	svc       AvatarService
 	templates *template.Template
 }
 
-func NewWebHandler(svc *services.AvatarService, webDir string) (*WebHandler, error) {
+func NewWebHandler(svc AvatarService, webDir string) (*WebHandler, error) {
 	pattern := filepath.Join(webDir, "templates", "*.html")
 	tmpl, err := template.ParseGlob(pattern)
 	if err != nil {
@@ -81,8 +81,7 @@ func (h *WebHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		Size:     header.Size,
 	})
 	if err != nil {
-		// Reuse API error mapping via a temporary AvatarHandler.
-		(&AvatarHandler{svc: h.svc}).writeServiceError(w, err)
+		writeServiceError(w, err, h.svc.MaxSize())
 		return
 	}
 

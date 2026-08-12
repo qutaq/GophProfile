@@ -15,10 +15,10 @@ import (
 const userIDHeader = "X-User-ID"
 
 type AvatarHandler struct {
-	svc *services.AvatarService
+	svc AvatarService
 }
 
-func NewAvatarHandler(svc *services.AvatarService) *AvatarHandler {
+func NewAvatarHandler(svc AvatarService) *AvatarHandler {
 	return &AvatarHandler{svc: svc}
 }
 
@@ -98,7 +98,7 @@ func (h *AvatarHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		Size:     header.Size,
 	})
 	if err != nil {
-		h.writeServiceError(w, err)
+		writeServiceError(w, err, h.svc.MaxSize())
 		return
 	}
 
@@ -116,7 +116,7 @@ func (h *AvatarHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	size := r.URL.Query().Get("size")
 	img, err := h.svc.GetImage(r.Context(), id, size)
 	if err != nil {
-		h.writeServiceError(w, err)
+		writeServiceError(w, err, h.svc.MaxSize())
 		return
 	}
 	defer img.Body.Close()
@@ -128,7 +128,7 @@ func (h *AvatarHandler) GetByUserID(w http.ResponseWriter, r *http.Request) {
 	size := r.URL.Query().Get("size")
 	img, err := h.svc.GetUserImage(r.Context(), userID, size)
 	if err != nil {
-		h.writeServiceError(w, err)
+		writeServiceError(w, err, h.svc.MaxSize())
 		return
 	}
 	defer img.Body.Close()
@@ -139,7 +139,7 @@ func (h *AvatarHandler) Metadata(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "avatar_id")
 	avatar, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		h.writeServiceError(w, err)
+		writeServiceError(w, err, h.svc.MaxSize())
 		return
 	}
 
@@ -171,7 +171,7 @@ func (h *AvatarHandler) ListByUserID(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "user_id")
 	avatars, err := h.svc.ListByUserID(r.Context(), userID)
 	if err != nil {
-		h.writeServiceError(w, err)
+		writeServiceError(w, err, h.svc.MaxSize())
 		return
 	}
 
@@ -200,7 +200,7 @@ func (h *AvatarHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "avatar_id")
 	if err := h.svc.Delete(r.Context(), id, userID); err != nil {
-		h.writeServiceError(w, err)
+		writeServiceError(w, err, h.svc.MaxSize())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -215,7 +215,7 @@ func (h *AvatarHandler) DeleteUserAvatar(w http.ResponseWriter, r *http.Request)
 
 	pathUserID := chi.URLParam(r, "user_id")
 	if err := h.svc.DeleteUserAvatar(r.Context(), pathUserID, headerUserID); err != nil {
-		h.writeServiceError(w, err)
+		writeServiceError(w, err, h.svc.MaxSize())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -228,7 +228,7 @@ func writeImage(w http.ResponseWriter, img *services.ImageContent) {
 	_, _ = io.Copy(w, img.Body)
 }
 
-func (h *AvatarHandler) writeServiceError(w http.ResponseWriter, err error) {
+func writeServiceError(w http.ResponseWriter, err error, maxSize int64) {
 	switch {
 	case errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrAlreadyDeleted):
 		writeError(w, http.StatusNotFound, "Avatar not found", nil)
@@ -244,7 +244,7 @@ func (h *AvatarHandler) writeServiceError(w http.ResponseWriter, err error) {
 		})
 	case errors.Is(err, domain.ErrFileTooLarge):
 		writeError(w, http.StatusRequestEntityTooLarge, "File too large", map[string]any{
-			"max_size": h.svc.MaxSize(),
+			"max_size": maxSize,
 		})
 	case errors.Is(err, domain.ErrEmptyFile):
 		writeError(w, http.StatusBadRequest, "Empty file", nil)

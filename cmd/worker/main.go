@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
-	"log"
+	"errors"
+	"log/slog"
+	"os"
 	"os/signal"
 	"syscall"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/qutaq/GophProfile/internal/config"
 	"github.com/qutaq/GophProfile/internal/events"
@@ -18,18 +22,21 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		slog.Error("load config", "err", err)
+		os.Exit(1)
 	}
 
 	db, err := postgres.Open(cfg.DB)
 	if err != nil {
-		log.Fatalf("connect postgres: %v", err)
+		slog.Error("connect postgres", "err", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
 	s3Client, err := infras3.NewClient(cfg.S3)
 	if err != nil {
-		log.Fatalf("create s3 client: %v", err)
+		slog.Error("create s3 client", "err", err)
+		os.Exit(1)
 	}
 
 	consumer, err := rabbitmq.NewConsumer(rabbitmq.Config{
@@ -37,7 +44,8 @@ func main() {
 		Exchange: cfg.RabbitMQ.Exchange,
 	})
 	if err != nil {
-		log.Fatalf("rabbitmq consumer: %v", err)
+		slog.Error("rabbitmq consumer", "err", err)
+		os.Exit(1)
 	}
 	defer consumer.Close()
 
@@ -48,15 +56,23 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := consumer.Consume(ctx, events.QueueUpload, w.HandleUpload); err != nil {
-		log.Fatalf("consume upload queue: %v", err)
-	}
-	if err := consumer.Consume(ctx, events.QueueDelete, w.HandleDelete); err != nil {
-		log.Fatalf("consume delete queue: %v", err)
-	}
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		return consumer.Consume(ctx, events.QueueUpload, w.HandleUpload)
+	})
+	g.Go(func() error {
+		return consumer.Consume(ctx, events.QueueDelete, w.HandleDelete)
+	})
 
-	log.Printf("%s worker started (env=%s exchange=%s)", cfg.App.Name, cfg.App.Env, cfg.RabbitMQ.Exchange)
+	slog.Info("worker started",
+		"app", cfg.App.Name,
+		"env", cfg.App.Env,
+		"exchange", cfg.RabbitMQ.Exchange,
+	)
 
-	<-ctx.Done()
-	log.Println("worker stopped")
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		slog.Error("worker failed", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("worker stopped")
 }

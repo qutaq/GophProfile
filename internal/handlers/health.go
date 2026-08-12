@@ -2,16 +2,17 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"net/http"
+	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type HealthDeps struct {
-	DB        *sql.DB
+	DB        *pgxpool.Pool
 	S3        *minio.Client
 	S3Bucket  string
 	RabbitURL string
@@ -19,10 +20,29 @@ type HealthDeps struct {
 
 type HealthHandler struct {
 	deps HealthDeps
+
+	mu         sync.Mutex
+	rabbitConn *amqp.Connection
 }
 
 func NewHealthHandler(deps HealthDeps) *HealthHandler {
 	return &HealthHandler{deps: deps}
+}
+
+// Close releases the reused RabbitMQ connection, if any.
+func (h *HealthHandler) Close() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.closeRabbitLocked()
+}
+
+func (h *HealthHandler) closeRabbitLocked() error {
+	if h.rabbitConn == nil {
+		return nil
+	}
+	err := h.rabbitConn.Close()
+	h.rabbitConn = nil
+	return err
 }
 
 type componentStatus struct {
@@ -67,7 +87,7 @@ func (h *HealthHandler) checkPostgres(ctx context.Context) componentStatus {
 		return componentStatus{Status: "error", Error: "db is not configured"}
 	}
 	start := time.Now()
-	if err := h.deps.DB.PingContext(ctx); err != nil {
+	if err := h.deps.DB.Ping(ctx); err != nil {
 		return componentStatus{Status: "error", Error: err.Error()}
 	}
 	return componentStatus{Status: "ok", Latency: time.Since(start).String()}
@@ -92,16 +112,36 @@ func (h *HealthHandler) checkRabbitMQ() componentStatus {
 	if h.deps.RabbitURL == "" {
 		return componentStatus{Status: "error", Error: "rabbitmq url is empty"}
 	}
+
 	start := time.Now()
-	conn, err := amqp.Dial(h.deps.RabbitURL)
-	if err != nil {
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if err := h.ensureRabbitConnLocked(); err != nil {
 		return componentStatus{Status: "error", Error: err.Error()}
 	}
-	defer conn.Close()
-	ch, err := conn.Channel()
+
+	ch, err := h.rabbitConn.Channel()
 	if err != nil {
+		_ = h.closeRabbitLocked()
 		return componentStatus{Status: "error", Error: err.Error()}
 	}
 	_ = ch.Close()
+
 	return componentStatus{Status: "ok", Latency: time.Since(start).String()}
+}
+
+func (h *HealthHandler) ensureRabbitConnLocked() error {
+	if h.rabbitConn != nil && !h.rabbitConn.IsClosed() {
+		return nil
+	}
+	h.rabbitConn = nil
+
+	conn, err := amqp.Dial(h.deps.RabbitURL)
+	if err != nil {
+		return err
+	}
+	h.rabbitConn = conn
+	return nil
 }
