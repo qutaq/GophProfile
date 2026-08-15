@@ -18,7 +18,7 @@ import (
 func TestWebUpload(t *testing.T) {
 	store := newMemAvatarStore()
 	storage := newMemObjectStorage()
-	svc := services.NewAvatarService(store, storage, nil, 1024*1024)
+	svc := services.NewAvatarService(store, storage, nil, 1024*1024, nil)
 	webDir := projectWebDir(t)
 	web, err := handlers.NewWebHandler(svc, webDir)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestWebUpload(t *testing.T) {
 }
 
 func TestNewWebHandlerInvalidDir(t *testing.T) {
-	svc := services.NewAvatarService(newMemAvatarStore(), newMemObjectStorage(), nil, 1024)
+	svc := services.NewAvatarService(newMemAvatarStore(), newMemObjectStorage(), nil, 1024, nil)
 	_, err := handlers.NewWebHandler(svc, t.TempDir())
 	require.Error(t, err)
 }

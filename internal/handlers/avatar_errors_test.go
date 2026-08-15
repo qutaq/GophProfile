@@ -63,7 +63,7 @@ func TestDeleteForbiddenAndNotFound(t *testing.T) {
 func TestWebGalleryPage(t *testing.T) {
 	store := newMemAvatarStore()
 	storage := newMemObjectStorage()
-	svc := services.NewAvatarService(store, storage, nil, 1024*1024)
+	svc := services.NewAvatarService(store, storage, nil, 1024*1024, nil)
 	webDir := projectWebDir(t)
 	web, err := handlers.NewWebHandler(svc, webDir)
 	require.NoError(t, err)

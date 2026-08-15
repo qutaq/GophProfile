@@ -11,37 +11,39 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("component", "migrate")
+
 	direction := flag.String("direction", "up", "migration direction: up|down|version")
 	flag.Parse()
 
 	cfg, err := config.Load()
 	if err != nil {
-		slog.Error("load config", "err", err)
+		logger.Error("load config", "err", err)
 		os.Exit(1)
 	}
 
 	switch *direction {
 	case "up":
-		if err := migrate.Up(cfg.DB.DSN()); err != nil {
-			slog.Error("migrate up", "err", err)
+		if err := migrate.Up(cfg.DB.DSN(), logger); err != nil {
+			logger.Error("migrate up", "err", err)
 			os.Exit(1)
 		}
-		slog.Info("migrations applied")
+		logger.Info("migrations applied")
 	case "down":
-		if err := migrate.Down(cfg.DB.DSN()); err != nil {
-			slog.Error("migrate down", "err", err)
+		if err := migrate.Down(cfg.DB.DSN(), logger); err != nil {
+			logger.Error("migrate down", "err", err)
 			os.Exit(1)
 		}
-		slog.Info("last migration rolled back")
+		logger.Info("last migration rolled back")
 	case "version":
-		version, dirty, err := migrate.Version(cfg.DB.DSN())
+		version, dirty, err := migrate.Version(cfg.DB.DSN(), logger)
 		if err != nil {
-			slog.Error("migrate version", "err", err)
+			logger.Error("migrate version", "err", err)
 			os.Exit(1)
 		}
 		fmt.Printf("version=%d dirty=%v\n", version, dirty)
 	default:
-		slog.Error("unknown migration direction", "direction", *direction)
+		logger.Error("unknown migration direction", "direction", *direction)
 		os.Exit(1)
 	}
 

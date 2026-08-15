@@ -20,29 +20,31 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
 	cfg, err := config.Load()
 	if err != nil {
-		slog.Error("load config", "err", err)
+		logger.Error("load config", "err", err)
 		os.Exit(1)
 	}
 
 	db, err := postgres.Open(cfg.DB)
 	if err != nil {
-		slog.Error("connect postgres", "err", err)
+		logger.Error("connect postgres", "err", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
 	s3Client, err := infras3.NewClient(cfg.S3)
 	if err != nil {
-		slog.Error("create s3 client", "err", err)
+		logger.Error("create s3 client", "err", err)
 		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := infras3.EnsureBucket(ctx, s3Client, cfg.S3.Bucket); err != nil {
-		slog.Error("ensure bucket", "err", err)
+		logger.Error("ensure bucket", "err", err)
 		os.Exit(1)
 	}
 
@@ -51,18 +53,18 @@ func main() {
 		Exchange: cfg.RabbitMQ.Exchange,
 	})
 	if err != nil {
-		slog.Error("rabbitmq publisher", "err", err)
+		logger.Error("rabbitmq publisher", "err", err)
 		os.Exit(1)
 	}
 	defer publisher.Close()
 
 	avatarRepo := repository.NewAvatarRepository(db)
 	storage := repository.NewS3Storage(s3Client, cfg.S3.Bucket)
-	avatarSvc := services.NewAvatarService(avatarRepo, storage, publisher, cfg.Upload.MaxSizeBytes)
+	avatarSvc := services.NewAvatarService(avatarRepo, storage, publisher, cfg.Upload.MaxSizeBytes, logger)
 
 	webHandler, err := handlers.NewWebHandler(avatarSvc, "web")
 	if err != nil {
-		slog.Error("load web templates", "err", err)
+		logger.Error("load web templates", "err", err)
 		os.Exit(1)
 	}
 
@@ -89,14 +91,14 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("server starting",
+		logger.Info("server starting",
 			"app", cfg.App.Name,
 			"addr", cfg.HTTP.Addr,
 			"env", cfg.App.Env,
 		)
-		slog.Info("web UI available", "url", "http://localhost"+cfg.HTTP.Addr+"/web/upload")
+		logger.Info("web UI available", "url", "http://localhost"+cfg.HTTP.Addr+"/web/upload")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server failed", "err", err)
+			logger.Error("server failed", "err", err)
 			os.Exit(1)
 		}
 	}()
@@ -108,7 +110,7 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("shutdown", "err", err)
+		logger.Error("shutdown", "err", err)
 	}
-	slog.Info("server stopped")
+	logger.Info("server stopped")
 }

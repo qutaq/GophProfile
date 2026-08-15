@@ -36,7 +36,7 @@ func TestNewConsumerInvalidURL(t *testing.T) {
 	_, err := rabbitmq.NewConsumer(rabbitmq.Config{
 		URL:      "://bad",
 		Exchange: "avatars.exchange",
-	})
+	}, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "dial rabbitmq")
 }

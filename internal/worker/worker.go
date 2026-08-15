@@ -30,10 +30,18 @@ type ObjectStorage interface {
 type Worker struct {
 	repo    AvatarRepository
 	storage ObjectStorage
+	log     *slog.Logger
 }
 
-func New(repo AvatarRepository, storage ObjectStorage) *Worker {
-	return &Worker{repo: repo, storage: storage}
+func New(repo AvatarRepository, storage ObjectStorage, logger *slog.Logger) *Worker {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	return &Worker{
+		repo:    repo,
+		storage: storage,
+		log:     logger.With("component", "worker"),
+	}
 }
 
 func (w *Worker) HandleUpload(ctx context.Context, body []byte, messageID string) error {
@@ -41,11 +49,11 @@ func (w *Worker) HandleUpload(ctx context.Context, body []byte, messageID string
 	if err := json.Unmarshal(body, &event); err != nil {
 		return fmt.Errorf("unmarshal upload event: %w", err)
 	}
-	slog.Info("handle upload", "message_id", messageID, "avatar_id", event.AvatarID)
+	w.log.Info("handle upload", "message_id", messageID, "avatar_id", event.AvatarID)
 
 	avatar, err := w.repo.GetByID(ctx, event.AvatarID)
 	if errors.Is(err, domain.ErrNotFound) {
-		slog.Info("avatar not found, skip", "avatar_id", event.AvatarID)
+		w.log.Info("avatar not found, skip", "avatar_id", event.AvatarID)
 		return nil
 	}
 	if err != nil {
@@ -53,7 +61,7 @@ func (w *Worker) HandleUpload(ctx context.Context, body []byte, messageID string
 	}
 
 	if avatar.ProcessingStatus == domain.ProcessingStatusCompleted && len(avatar.ThumbnailS3Keys) > 0 {
-		slog.Info("avatar already processed, skip", "avatar_id", event.AvatarID)
+		w.log.Info("avatar already processed, skip", "avatar_id", event.AvatarID)
 		return nil
 	}
 
@@ -105,7 +113,7 @@ func (w *Worker) HandleUpload(ctx context.Context, body []byte, messageID string
 		return err
 	}
 
-	slog.Info("avatar processing completed", "avatar_id", event.AvatarID)
+	w.log.Info("avatar processing completed", "avatar_id", event.AvatarID)
 	return nil
 }
 
@@ -114,7 +122,7 @@ func (w *Worker) HandleDelete(ctx context.Context, body []byte, messageID string
 	if err := json.Unmarshal(body, &event); err != nil {
 		return fmt.Errorf("unmarshal delete event: %w", err)
 	}
-	slog.Info("handle delete",
+	w.log.Info("handle delete",
 		"message_id", messageID,
 		"avatar_id", event.AvatarID,
 		"keys", len(event.S3Keys),

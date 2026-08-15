@@ -15,9 +15,15 @@ type Consumer struct {
 	conn     *amqp.Connection
 	ch       *amqp.Channel
 	exchange string
+	log      *slog.Logger
 }
 
-func NewConsumer(cfg Config) (*Consumer, error) {
+func NewConsumer(cfg Config, logger *slog.Logger) (*Consumer, error) {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	logger = logger.With("component", "rabbitmq-consumer")
+
 	conn, err := amqp.Dial(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("dial rabbitmq: %w", err)
@@ -41,7 +47,7 @@ func NewConsumer(cfg Config) (*Consumer, error) {
 		return nil, fmt.Errorf("qos: %w", err)
 	}
 
-	return &Consumer{conn: conn, ch: ch, exchange: cfg.Exchange}, nil
+	return &Consumer{conn: conn, ch: ch, exchange: cfg.Exchange, log: logger}, nil
 }
 
 func (c *Consumer) Close() error {
@@ -85,18 +91,21 @@ func (c *Consumer) handleDelivery(ctx context.Context, d amqp.Delivery, handler 
 		msgID = fmt.Sprintf("generated-%d", time.Now().UnixNano())
 	}
 
-	err := retryWithBackoff(ctx, maxRetries, func() error {
+	err := retryWithBackoff(ctx, c.log, maxRetries, func() error {
 		return handler(ctx, d.Body, msgID)
 	})
 	if err != nil {
-		slog.Error("message failed after retries", "message_id", msgID, "err", err)
+		c.log.Error("message failed after retries", "message_id", msgID, "err", err)
 		_ = d.Nack(false, false)
 		return
 	}
 	_ = d.Ack(false)
 }
 
-func retryWithBackoff(ctx context.Context, attempts int, fn func() error) error {
+func retryWithBackoff(ctx context.Context, logger *slog.Logger, attempts int, fn func() error) error {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	var err error
 	for i := 0; i < attempts; i++ {
 		if err = fn(); err == nil {
@@ -106,7 +115,7 @@ func retryWithBackoff(ctx context.Context, attempts int, fn func() error) error 
 			break
 		}
 		backoff := time.Duration(1<<uint(i)) * 200 * time.Millisecond
-		slog.Warn("retrying message handler",
+		logger.Warn("retrying message handler",
 			"attempt", i+1,
 			"max_attempts", attempts,
 			"backoff", backoff.String(),

@@ -39,14 +39,18 @@ type AvatarService struct {
 	publisher  EventPublisher
 	maxSize    int64
 	publicBase string
+	log        *slog.Logger
 }
 
-func NewAvatarService(repo AvatarStore, storage ObjectStorage, publisher EventPublisher, maxSize int64) *AvatarService {
+func NewAvatarService(repo AvatarStore, storage ObjectStorage, publisher EventPublisher, maxSize int64, logger *slog.Logger) *AvatarService {
 	if maxSize <= 0 {
 		maxSize = 10 * 1024 * 1024
 	}
 	if publisher == nil {
 		publisher = NoopPublisher{}
+	}
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
 	}
 	return &AvatarService{
 		repo:       repo,
@@ -54,6 +58,7 @@ func NewAvatarService(repo AvatarStore, storage ObjectStorage, publisher EventPu
 		publisher:  publisher,
 		maxSize:    maxSize,
 		publicBase: "/api/v1/avatars",
+		log:        logger.With("component", "avatar-service"),
 	}
 }
 
@@ -121,7 +126,7 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (*UploadResu
 		UserID:   in.UserID,
 		S3Key:    s3Key,
 	}); err != nil {
-		slog.Error("publish upload event", "avatar_id", avatarID, "err", err)
+		s.log.Error("publish upload event", "avatar_id", avatarID, "err", err)
 	}
 
 	return &UploadResult{
@@ -219,7 +224,7 @@ func (s *AvatarService) Delete(ctx context.Context, avatarID, userID string) err
 		AvatarID: avatarID,
 		S3Keys:   keys,
 	}); err != nil {
-		slog.Error("publish delete event", "avatar_id", avatarID, "err", err)
+		s.log.Error("publish delete event", "avatar_id", avatarID, "err", err)
 	}
 	return nil
 }

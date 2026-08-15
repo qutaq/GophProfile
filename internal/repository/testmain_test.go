@@ -35,7 +35,7 @@ func openTestDB(t *testing.T) *pgxpool.Pool {
 		t.Skipf("postgres ping failed, skip integration test: %v", err)
 	}
 
-	if err := migrate.Up(cfg.DB.DSN()); err != nil {
+	if err := migrate.Up(cfg.DB.DSN(), nil); err != nil {
 		db.Close()
 		t.Fatalf("migrate up: %v", err)
 	}

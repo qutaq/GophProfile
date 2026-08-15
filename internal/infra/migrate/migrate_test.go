@@ -9,16 +9,16 @@ import (
 )
 
 func TestUpInvalidDSN(t *testing.T) {
-	err := migrate.Up("postgres://bad:bad@127.0.0.1:1/none?sslmode=disable")
+	err := migrate.Up("postgres://bad:bad@127.0.0.1:1/none?sslmode=disable", nil)
 	require.Error(t, err)
 }
 
 func TestVersionInvalidDSN(t *testing.T) {
-	_, _, err := migrate.Version("postgres://bad:bad@127.0.0.1:1/none?sslmode=disable")
+	_, _, err := migrate.Version("postgres://bad:bad@127.0.0.1:1/none?sslmode=disable", nil)
 	require.Error(t, err)
 }
 
 func TestDownInvalidDSN(t *testing.T) {
-	err := migrate.Down("postgres://bad:bad@127.0.0.1:1/none?sslmode=disable")
+	err := migrate.Down("postgres://bad:bad@127.0.0.1:1/none?sslmode=disable", nil)
 	require.Error(t, err)
 }

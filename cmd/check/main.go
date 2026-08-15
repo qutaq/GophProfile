@@ -14,9 +14,11 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
 	cfg, err := config.Load()
 	if err != nil {
-		slog.Error("load config", "err", err)
+		logger.Error("load config", "err", err)
 		os.Exit(1)
 	}
 
@@ -26,10 +28,10 @@ func main() {
 	failed := false
 
 	if err := checkPostgres(ctx, cfg); err != nil {
-		slog.Error("postgres check failed", "err", err)
+		logger.Error("postgres check failed", "err", err)
 		failed = true
 	} else {
-		slog.Info("postgres check ok",
+		logger.Info("postgres check ok",
 			"host", cfg.DB.Host,
 			"port", cfg.DB.Port,
 			"db", cfg.DB.Name,
@@ -37,20 +39,20 @@ func main() {
 	}
 
 	if err := checkS3(ctx, cfg); err != nil {
-		slog.Error("minio check failed", "err", err)
+		logger.Error("minio check failed", "err", err)
 		failed = true
 	} else {
-		slog.Info("minio check ok",
+		logger.Info("minio check ok",
 			"endpoint", cfg.S3.Endpoint,
 			"bucket", cfg.S3.Bucket,
 		)
 	}
 
 	if err := checkRabbitMQ(cfg); err != nil {
-		slog.Error("rabbitmq check failed", "err", err)
+		logger.Error("rabbitmq check failed", "err", err)
 		failed = true
 	} else {
-		slog.Info("rabbitmq check ok", "exchange", cfg.RabbitMQ.Exchange)
+		logger.Info("rabbitmq check ok", "exchange", cfg.RabbitMQ.Exchange)
 	}
 
 	if failed {

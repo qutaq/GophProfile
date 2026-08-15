@@ -15,7 +15,7 @@ import (
 )
 
 func TestWorker_HandleUploadNotFoundAndBadJSON(t *testing.T) {
-	w := worker.New(&memRepo{}, newMemStorage())
+	w := worker.New(&memRepo{}, newMemStorage(), nil)
 
 	err := w.HandleUpload(context.Background(), []byte(`{`), "m1")
 	require.Error(t, err)
@@ -37,7 +37,7 @@ func TestWorker_HandleUploadDownloadAndResizeErrors(t *testing.T) {
 		ProcessingStatus: domain.ProcessingStatusProcessing,
 		ThumbnailS3Keys:  domain.ThumbnailKeys{},
 	}}
-	w := worker.New(repo, storage)
+	w := worker.New(repo, storage, nil)
 
 	body, _ := json.Marshal(events.AvatarUploadEvent{
 		AvatarID: "a1",
@@ -62,7 +62,7 @@ func TestWorker_HandleUploadDownloadAndResizeErrors(t *testing.T) {
 }
 
 func TestWorker_HandleDeleteBadJSONAndStorageError(t *testing.T) {
-	w := worker.New(&memRepo{}, &failingDeleteStorage{memStorage: *newMemStorage()})
+	w := worker.New(&memRepo{}, &failingDeleteStorage{memStorage: *newMemStorage()}, nil)
 
 	err := w.HandleDelete(context.Background(), []byte(`{`), "m")
 	require.Error(t, err)

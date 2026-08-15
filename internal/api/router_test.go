@@ -48,7 +48,7 @@ func (stubStorage) Delete(context.Context, ...string) error { return nil }
 
 func newTestHandlers(t *testing.T, webDir string) api.Handlers {
 	t.Helper()
-	svc := services.NewAvatarService(stubStore{}, stubStorage{}, nil, 1024)
+	svc := services.NewAvatarService(stubStore{}, stubStorage{}, nil, 1024, nil)
 	h := api.Handlers{
 		Avatars: handlers.NewAvatarHandler(svc),
 		Health:  handlers.NewHealthHandler(handlers.HealthDeps{}),
@@ -122,7 +122,7 @@ func TestNewRouterWithWebRedirectsAndStatic(t *testing.T) {
 
 func TestNewRouterDefaultWebDir(t *testing.T) {
 	webDir := prepareWebDir(t)
-	svc := services.NewAvatarService(stubStore{}, stubStorage{}, nil, 1024)
+	svc := services.NewAvatarService(stubStore{}, stubStorage{}, nil, 1024, nil)
 	web, err := handlers.NewWebHandler(svc, webDir)
 	require.NoError(t, err)
 

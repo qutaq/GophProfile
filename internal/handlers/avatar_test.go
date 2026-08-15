@@ -17,7 +17,7 @@ import (
 func newTestRouter(maxSize int64) http.Handler {
 	store := newMemAvatarStore()
 	storage := newMemObjectStorage()
-	svc := services.NewAvatarService(store, storage, nil, maxSize)
+	svc := services.NewAvatarService(store, storage, nil, maxSize, nil)
 	return api.NewRouter(api.Handlers{
 		Avatars: handlers.NewAvatarHandler(svc),
 		Health:  handlers.NewHealthHandler(handlers.HealthDeps{}),

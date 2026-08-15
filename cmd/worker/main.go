@@ -20,38 +20,40 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
 	cfg, err := config.Load()
 	if err != nil {
-		slog.Error("load config", "err", err)
+		logger.Error("load config", "err", err)
 		os.Exit(1)
 	}
 
 	db, err := postgres.Open(cfg.DB)
 	if err != nil {
-		slog.Error("connect postgres", "err", err)
+		logger.Error("connect postgres", "err", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
 	s3Client, err := infras3.NewClient(cfg.S3)
 	if err != nil {
-		slog.Error("create s3 client", "err", err)
+		logger.Error("create s3 client", "err", err)
 		os.Exit(1)
 	}
 
 	consumer, err := rabbitmq.NewConsumer(rabbitmq.Config{
 		URL:      cfg.RabbitMQ.URL,
 		Exchange: cfg.RabbitMQ.Exchange,
-	})
+	}, logger)
 	if err != nil {
-		slog.Error("rabbitmq consumer", "err", err)
+		logger.Error("rabbitmq consumer", "err", err)
 		os.Exit(1)
 	}
 	defer consumer.Close()
 
 	avatarRepo := repository.NewAvatarRepository(db)
 	storage := repository.NewS3Storage(s3Client, cfg.S3.Bucket)
-	w := worker.New(avatarRepo, storage)
+	w := worker.New(avatarRepo, storage, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -64,15 +66,15 @@ func main() {
 		return consumer.Consume(ctx, events.QueueDelete, w.HandleDelete)
 	})
 
-	slog.Info("worker started",
+	logger.Info("worker started",
 		"app", cfg.App.Name,
 		"env", cfg.App.Env,
 		"exchange", cfg.RabbitMQ.Exchange,
 	)
 
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		slog.Error("worker failed", "err", err)
+		logger.Error("worker failed", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("worker stopped")
+	logger.Info("worker stopped")
 }

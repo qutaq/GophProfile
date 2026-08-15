@@ -13,12 +13,12 @@ import (
 	appmigrations "github.com/qutaq/GophProfile/migrations"
 )
 
-func Up(databaseURL string) error {
+func Up(databaseURL string, logger *slog.Logger) error {
 	m, err := newMigrator(databaseURL)
 	if err != nil {
 		return err
 	}
-	defer closeMigrator(m)
+	defer closeMigrator(m, logger)
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("migrate up: %w", err)
@@ -26,12 +26,12 @@ func Up(databaseURL string) error {
 	return nil
 }
 
-func Down(databaseURL string) error {
+func Down(databaseURL string, logger *slog.Logger) error {
 	m, err := newMigrator(databaseURL)
 	if err != nil {
 		return err
 	}
-	defer closeMigrator(m)
+	defer closeMigrator(m, logger)
 
 	if err := m.Steps(-1); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("migrate down: %w", err)
@@ -39,12 +39,12 @@ func Down(databaseURL string) error {
 	return nil
 }
 
-func Version(databaseURL string) (uint, bool, error) {
+func Version(databaseURL string, logger *slog.Logger) (uint, bool, error) {
 	m, err := newMigrator(databaseURL)
 	if err != nil {
 		return 0, false, err
 	}
-	defer closeMigrator(m)
+	defer closeMigrator(m, logger)
 
 	version, dirty, err := m.Version()
 	if errors.Is(err, migrate.ErrNilVersion) {
@@ -80,12 +80,20 @@ func toPgx5URL(databaseURL string) string {
 	}
 }
 
-func closeMigrator(m *migrate.Migrate) {
+func closeMigrator(m *migrate.Migrate, logger *slog.Logger) {
+	logger = ensureLogger(logger)
 	srcErr, dbErr := m.Close()
 	if srcErr != nil {
-		slog.Error("migrate source close", "err", srcErr)
+		logger.Error("migrate source close", "err", srcErr)
 	}
 	if dbErr != nil {
-		slog.Error("migrate db close", "err", dbErr)
+		logger.Error("migrate db close", "err", dbErr)
 	}
+}
+
+func ensureLogger(logger *slog.Logger) *slog.Logger {
+	if logger != nil {
+		return logger
+	}
+	return slog.New(slog.DiscardHandler)
 }
