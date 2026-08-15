@@ -1,0 +1,119 @@
+version: "3"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  deps:
+    desc: Download and tidy Go module dependencies
+    cmds:
+      - go get github.com/go-chi/chi/v5@latest
+      - go get github.com/minio/minio-go/v7@latest
+      - go get github.com/rabbitmq/amqp091-go@latest
+      - go get github.com/golang-migrate/migrate/v4@latest
+      - go get github.com/golang-migrate/migrate/v4/database/postgres@latest
+      - go get github.com/golang-migrate/migrate/v4/source/file@latest
+      - go get github.com/disintegration/imaging@latest
+      - go get golang.org/x/image@latest
+      - go get github.com/stretchr/testify@latest
+      - go mod tidy
+
+  build:
+    desc: Build server and worker binaries into bin/
+    cmds:
+      - go build -o bin/server ./cmd/server
+      - go build -o bin/worker ./cmd/worker
+
+  test:
+    desc: Run all Go tests
+    cmds:
+      - go test ./...
+
+  cover:
+    desc: Run tests for internal packages and require coverage >= 50%
+    cmds:
+      - |
+        {{if eq OS "windows"}}powershell -ExecutionPolicy Bypass -File ./scripts/check-coverage.ps1{{else}}bash ./scripts/check-coverage.sh{{end}}
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  lint:install:
+    desc: Install golangci-lint into GOPATH/bin
+    cmds:
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+
+  run-server:
+    desc: Run HTTP server
+    cmds:
+      - go run ./cmd/server
+
+  run-worker:
+    desc: Run background worker
+    cmds:
+      - go run ./cmd/worker
+
+  docker:bins:
+    desc: Cross-compile linux binaries into dist/linux
+    cmds:
+      - |
+        {{if eq OS "windows"}}powershell -Command "New-Item -ItemType Directory -Force -Path dist/linux | Out-Null; $env:CGO_ENABLED='0'; $env:GOOS='linux'; $env:GOARCH='amd64'; go build -trimpath -ldflags='-s -w' -o dist/linux/server ./cmd/server; go build -trimpath -ldflags='-s -w' -o dist/linux/worker ./cmd/worker; go build -trimpath -ldflags='-s -w' -o dist/linux/migrate ./cmd/migrate"{{else}}mkdir -p dist/linux && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o dist/linux/server ./cmd/server && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o dist/linux/worker ./cmd/worker && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o dist/linux/migrate ./cmd/migrate{{end}}
+
+  up:
+    desc: Start full stack in Docker (infra + migrate + server + worker)
+    cmds:
+      - docker compose up -d --build
+
+  up:prebuilt:
+    desc: Start stack using locally built linux binaries (no golang base image pull)
+    deps: [docker:bins]
+    cmds:
+      - docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml up -d --build
+
+  up:infra:
+    desc: Start only infra services (Postgres, MinIO, RabbitMQ)
+    cmds:
+      - docker compose up -d postgres minio minio-init rabbitmq
+
+  down:
+    desc: Stop Docker Compose stack
+    cmds:
+      - docker compose down
+
+  logs:
+    desc: Tail server and worker logs
+    cmds:
+      - docker compose logs -f server worker
+
+  migrate:
+    desc: Apply database migrations
+    cmds:
+      - go run ./cmd/migrate -direction=up
+
+  migrate:down:
+    desc: Roll back the last database migration
+    cmds:
+      - go run ./cmd/migrate -direction=down
+
+  migrate:version:
+    desc: Show current migration version
+    cmds:
+      - go run ./cmd/migrate -direction=version
+
+  check:
+    desc: Check Postgres, MinIO and RabbitMQ connectivity
+    cmds:
+      - go run ./cmd/check
+
+  infra:
+    desc: Start infra only, apply migrations and verify connections
+    cmds:
+      - task: up:infra
+      - |
+        {{if eq OS "windows"}}powershell -Command "Start-Sleep -Seconds 8"{{else}}sleep 8{{end}}
+      - task: migrate
+      - task: check

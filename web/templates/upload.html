@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GophProfile — Upload</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/web/static/app.css">
+</head>
+<body>
+  <main class="shell">
+    <h1 class="brand">GophProfile</h1>
+    <p class="tagline">Загрузите аватар один раз — и отдавайте его любым сервисам по запросу.</p>
+
+    <nav class="nav">
+      <a href="/web/upload" aria-current="page">Upload</a>
+      <a href="/web/gallery/demo-user">Gallery</a>
+      <a href="/health">Health</a>
+    </nav>
+
+    <section class="panel">
+      <div id="flash" class="flash" hidden></div>
+
+      <form id="upload-form">
+        <div class="field">
+          <label for="user_id">User ID</label>
+          <input id="user_id" name="user_id" type="text" placeholder="например, demo-user" value="{{.UserID}}" required>
+        </div>
+
+        <div id="dropzone" class="dropzone" role="button" tabindex="0">
+          <div>
+            <strong>Перетащите изображение сюда</strong>
+            <span>JPEG, PNG или WebP · до 10 MB</span>
+          </div>
+        </div>
+        <input id="file-input" type="file" name="file" accept="image/jpeg,image/png,image/webp" hidden>
+
+        <div id="preview" class="preview">
+          <img id="preview-img" alt="Превью">
+          <div id="preview-name"></div>
+        </div>
+
+        <div id="progress" class="progress" aria-hidden="true"><i id="progress-bar"></i></div>
+
+        <div class="actions" style="margin-top:1.25rem">
+          <button id="submit-btn" type="submit">Загрузить аватар</button>
+          <a class="btn btn-ghost" href="/web/gallery/demo-user">Открыть галерею</a>
+        </div>
+      </form>
+    </section>
+  </main>
+  <script src="/web/static/app.js"></script>
+</body>
+</html>

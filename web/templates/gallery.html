@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GophProfile — Gallery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/web/static/app.css">
+</head>
+<body>
+  <main class="shell">
+    <h1 class="brand">GophProfile</h1>
+    <p class="tagline">Галерея аватарок пользователя <strong>{{.UserID}}</strong>.</p>
+
+    <nav class="nav">
+      <a href="/web/upload">Upload</a>
+      <a href="/web/gallery/{{.UserID}}" aria-current="page">Gallery</a>
+      <a href="/health">Health</a>
+    </nav>
+
+    {{if .UploadedID}}
+    <div class="flash ok">Аватар загружен: <code>{{.UploadedID}}</code>. Миниатюры появятся после обработки worker'ом.</div>
+    {{end}}
+
+    <div class="gallery-head">
+      <form method="get" action="/web/gallery/" id="switch-form" onsubmit="event.preventDefault(); location.href='/web/gallery/'+encodeURIComponent(this.user.value.trim())">
+        <div class="field" style="margin:0">
+          <label for="user">User ID</label>
+          <input id="user" name="user" type="text" value="{{.UserID}}">
+        </div>
+      </form>
+      <div class="actions">
+        <button class="btn" form="switch-form" type="submit">Показать</button>
+        <a class="btn btn-ghost" href="/web/upload">Новая загрузка</a>
+      </div>
+    </div>
+
+    {{if .Avatars}}
+    <div class="gallery-grid">
+      {{range .Avatars}}
+      <article class="gallery-item">
+        <a href="/api/v1/avatars/{{.ID}}" target="_blank" rel="noopener">
+          <img src="/api/v1/avatars/{{.ID}}?size=300x300" alt="{{.FileName}}"
+               onerror="this.onerror=null;this.src='/api/v1/avatars/{{.ID}}'">
+        </a>
+        <div class="meta">
+          <div><code>{{.ID}}</code></div>
+          <div>{{.FileName}} · {{.Status}}</div>
+          <div>
+            <a href="/api/v1/avatars/{{.ID}}/metadata">metadata</a>
+            ·
+            <a href="/api/v1/avatars/{{.ID}}?size=100x100">100×100</a>
+          </div>
+        </div>
+      </article>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="empty">Пока нет аватарок. <a href="/web/upload">Загрузить первую</a>.</p>
+    {{end}}
+  </main>
+</body>
+</html>
