@@ -18,6 +18,14 @@ tasks:
       - go get github.com/disintegration/imaging@latest
       - go get golang.org/x/image@latest
       - go get github.com/stretchr/testify@latest
+      - go get go.opentelemetry.io/otel@latest
+      - go get go.opentelemetry.io/otel/sdk@latest
+      - go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@latest
+      - go get go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@latest
+      - go get go.opentelemetry.io/otel/trace@latest
+      - go get github.com/prometheus/client_golang@latest
+      - go get github.com/riandyrn/otelchi@latest
+      - go get github.com/exaring/otelpgx@latest
       - go mod tidy
 
   build:
@@ -68,6 +76,11 @@ tasks:
     cmds:
       - docker compose up -d --build
 
+  up:obs:
+    desc: Start full stack with observability (Jaeger, Prometheus, Loki, Grafana)
+    cmds:
+      - docker compose --profile obs up -d --build
+
   up:prebuilt:
     desc: Start stack using locally built linux binaries (no golang base image pull)
     deps: [docker:bins]
@@ -82,12 +95,17 @@ tasks:
   down:
     desc: Stop Docker Compose stack
     cmds:
-      - docker compose down
+      - docker compose --profile obs down
 
   logs:
     desc: Tail server and worker logs
     cmds:
       - docker compose logs -f server worker
+
+  logs:obs:
+    desc: Tail observability stack logs
+    cmds:
+      - docker compose --profile obs logs -f jaeger prometheus loki promtail grafana alertmanager
 
   migrate:
     desc: Apply database migrations

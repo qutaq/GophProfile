@@ -31,6 +31,6 @@ COPY --from=builder /app/web ./web
 
 USER appuser
 
-EXPOSE 8080
+EXPOSE 8080 9091
 
 CMD ["./server"]

@@ -11,4 +11,5 @@ import (
 	_ "github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/minio/minio-go/v7"
 	_ "github.com/rabbitmq/amqp091-go"
+	_ "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )

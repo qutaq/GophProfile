@@ -19,6 +19,13 @@ x-app-env: &app-env
   RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
   RABBITMQ_EXCHANGE: avatars.exchange
   UPLOAD_MAX_SIZE_BYTES: "10485760"
+  OTEL_ENABLED: "true"
+  OTEL_SERVICE_NAME: gophprofile-server
+  OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+  OTEL_EXPORTER_OTLP_INSECURE: "true"
+  LOG_LEVEL: info
+  METRICS_PATH: /metrics
+  METRICS_ADDR: ":9091"
 
 services:
   postgres:
@@ -126,6 +133,9 @@ services:
         condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
+      jaeger:
+        condition: service_started
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 10s
@@ -142,6 +152,9 @@ services:
     command: ["./worker"]
     environment:
       <<: *app-env
+      OTEL_SERVICE_NAME: gophprofile-worker
+    ports:
+      - "9091:9091"
     depends_on:
       postgres:
         condition: service_healthy
@@ -153,9 +166,109 @@ services:
         condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
+      jaeger:
+        condition: service_started
+        required: false
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.66.0
+    container_name: gophprofile-jaeger
+    profiles: ["obs"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: gophprofile-prometheus
+    profiles: ["obs"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - server
+      - worker
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: gophprofile-loki
+    profiles: ["obs"]
+    user: "0"
+    command: -config.file=/etc/loki/config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./deploy/observability/loki.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.4.2
+    container_name: gophprofile-promtail
+    profiles: ["obs"]
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./deploy/observability/promtail.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: gophprofile-grafana
+    profiles: ["obs"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/gophprofile.json
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: gophprofile-alertmanager
+    profiles: ["obs"]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./deploy/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
     restart: unless-stopped
 
 volumes:
   postgres_data:
   minio_data:
   rabbitmq_data:
+  prometheus_data:
+  loki_data:
+  grafana_data:
+  alertmanager_data:

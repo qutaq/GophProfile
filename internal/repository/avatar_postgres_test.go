@@ -125,4 +125,12 @@ func TestAvatarRepository_CRUDAndSoftDelete(t *testing.T) {
 	if !errors.Is(err, domain.ErrAlreadyDeleted) {
 		t.Fatalf("second SoftDelete: %v, want ErrAlreadyDeleted", err)
 	}
+
+	total, err := repo.SumActiveSizeBytes(ctx)
+	if err != nil {
+		t.Fatalf("SumActiveSizeBytes: %v", err)
+	}
+	if total < 100 {
+		t.Fatalf("SumActiveSizeBytes = %d, want at least remaining avatar", total)
+	}
 }

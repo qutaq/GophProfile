@@ -1,0 +1,41 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    uid: prometheus
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+
+  - name: Loki
+    type: loki
+    access: proxy
+    uid: loki
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id"\s*:\s*"([A-Fa-f0-9]+)"'
+          datasourceUid: jaeger
+          url: "$${__value.raw}"
+          urlDisplayLabel: View in Jaeger
+
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    uid: jaeger
+    url: http://jaeger:16686
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-1m"
+        spanEndTimeShift: "1m"
+        filterByTraceID: false
+        customQuery: true
+        query: '{service=~"gophprofile-.*"} | json | trace_id=`$${__span.traceId}`'

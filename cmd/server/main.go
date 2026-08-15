@@ -15,18 +15,35 @@ import (
 	"github.com/qutaq/GophProfile/internal/infra/postgres"
 	"github.com/qutaq/GophProfile/internal/infra/rabbitmq"
 	infras3 "github.com/qutaq/GophProfile/internal/infra/s3"
+	"github.com/qutaq/GophProfile/internal/observability"
 	"github.com/qutaq/GophProfile/internal/repository"
 	"github.com/qutaq/GophProfile/internal/services"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	bootstrap := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Error("load config", "err", err)
+		bootstrap.Error("load config", "err", err)
 		os.Exit(1)
 	}
+
+	logger := observability.NewLogger(cfg.Observability.LogLevel, cfg.Observability.ServiceName)
+	slog.SetDefault(logger)
+
+	shutdownTracer, err := observability.InitTracer(context.Background(), cfg.Observability)
+	if err != nil {
+		logger.Error("init tracer", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracer(ctx); err != nil {
+			logger.Error("shutdown tracer", "err", err)
+		}
+	}()
 
 	db, err := postgres.Open(cfg.DB)
 	if err != nil {
@@ -34,6 +51,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+
+	observability.RegisterDBPool(db)
 
 	s3Client, err := infras3.NewClient(cfg.S3)
 	if err != nil {
@@ -76,11 +95,18 @@ func main() {
 	})
 	defer healthHandler.Close()
 
+	runCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go observability.CollectStorageBytes(runCtx, avatarRepo.SumActiveSizeBytes, 15*time.Second, logger)
+
 	router := api.NewRouter(api.Handlers{
-		Avatars: handlers.NewAvatarHandler(avatarSvc),
-		Health:  healthHandler,
-		Web:     webHandler,
-		WebDir:  "web",
+		Avatars:     handlers.NewAvatarHandler(avatarSvc),
+		Health:      healthHandler,
+		Web:         webHandler,
+		WebDir:      "web",
+		MetricsPath: cfg.Observability.MetricsPath,
+		Logger:      logger,
 	})
 
 	server := &http.Server{
@@ -103,8 +129,6 @@ func main() {
 		}
 	}()
 
-	runCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	<-runCtx.Done()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

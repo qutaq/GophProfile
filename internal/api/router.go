@@ -1,28 +1,53 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/riandyrn/otelchi"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/qutaq/GophProfile/internal/handlers"
+	"github.com/qutaq/GophProfile/internal/observability"
 )
 
 type Handlers struct {
-	Avatars *handlers.AvatarHandler
-	Health  *handlers.HealthHandler
-	Web     *handlers.WebHandler
-	WebDir  string
+	Avatars     *handlers.AvatarHandler
+	Health      *handlers.HealthHandler
+	Web         *handlers.WebHandler
+	WebDir      string
+	MetricsPath string
+	Logger      *slog.Logger
 }
 
 func NewRouter(h Handlers) http.Handler {
 	r := chi.NewRouter()
+
+	metricsPath := h.MetricsPath
+	if metricsPath == "" {
+		metricsPath = "/metrics"
+	}
+
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(otelchi.Middleware("gophprofile-server",
+		otelchi.WithChiRoutes(r),
+		otelchi.WithRequestMethodInSpanName(true),
+		otelchi.WithFilter(func(req *http.Request) bool {
+			path := req.URL.Path
+			return path != "/health" && path != metricsPath
+		}),
+	))
+	r.Use(withUserIDSpan)
+	r.Use(observability.AccessLog(h.Logger, metricsPath))
+	r.Use(observability.HTTPMetrics(metricsPath))
 	r.Use(middleware.Recoverer)
+
+	r.Handle(metricsPath, observability.MetricsHandler())
 
 	r.Get("/health", h.Health.Health)
 
@@ -57,4 +82,13 @@ func NewRouter(h Handlers) http.Handler {
 	}
 
 	return r
+}
+
+func withUserIDSpan(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if userID := r.Header.Get("X-User-ID"); userID != "" {
+			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("user.id", userID))
+		}
+		next.ServeHTTP(w, r)
+	})
 }

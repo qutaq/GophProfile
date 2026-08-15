@@ -4,17 +4,19 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // Config holds application configuration loaded from environment variables.
 type Config struct {
-	App      AppConfig
-	HTTP     HTTPConfig
-	DB       DBConfig
-	S3       S3Config
-	RabbitMQ RabbitMQConfig
-	Upload   UploadConfig
+	App           AppConfig
+	HTTP          HTTPConfig
+	DB            DBConfig
+	S3            S3Config
+	RabbitMQ      RabbitMQConfig
+	Upload        UploadConfig
+	Observability ObservabilityConfig
 }
 
 type AppConfig struct {
@@ -62,6 +64,16 @@ type UploadConfig struct {
 	MaxSizeBytes int64
 }
 
+type ObservabilityConfig struct {
+	Enabled      bool
+	ServiceName  string
+	OTLPEndpoint string
+	Insecure     bool
+	LogLevel     string
+	MetricsPath  string
+	MetricsAddr  string
+}
+
 // Load reads configuration from environment variables and applies defaults.
 func Load() (*Config, error) {
 	readTimeout, err := getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second)
@@ -81,6 +93,14 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	maxSizeBytes, err := getEnvInt64("UPLOAD_MAX_SIZE_BYTES", 10*1024*1024)
+	if err != nil {
+		return nil, err
+	}
+	otelEnabled, err := getEnvBool("OTEL_ENABLED", true)
+	if err != nil {
+		return nil, err
+	}
+	otelInsecure, err := getEnvBool("OTEL_EXPORTER_OTLP_INSECURE", true)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +138,15 @@ func Load() (*Config, error) {
 		Upload: UploadConfig{
 			MaxSizeBytes: maxSizeBytes,
 		},
+		Observability: ObservabilityConfig{
+			Enabled:      otelEnabled,
+			ServiceName:  getEnv("OTEL_SERVICE_NAME", "gophprofile-server"),
+			OTLPEndpoint: getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "jaeger:4317"),
+			Insecure:     otelInsecure,
+			LogLevel:     strings.ToLower(getEnv("LOG_LEVEL", "info")),
+			MetricsPath:  getEnv("METRICS_PATH", "/metrics"),
+			MetricsAddr:  getEnv("METRICS_ADDR", ":9091"),
+		},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -142,6 +171,20 @@ func (c *Config) Validate() error {
 	}
 	if c.Upload.MaxSizeBytes <= 0 {
 		return fmt.Errorf("UPLOAD_MAX_SIZE_BYTES must be positive")
+	}
+	if c.Observability.ServiceName == "" {
+		return fmt.Errorf("OTEL_SERVICE_NAME is required")
+	}
+	if c.Observability.MetricsPath == "" {
+		return fmt.Errorf("METRICS_PATH is required")
+	}
+	switch c.Observability.LogLevel {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("LOG_LEVEL must be debug, info, warn or error")
+	}
+	if c.Observability.Enabled && c.Observability.OTLPEndpoint == "" {
+		return fmt.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT is required when OTEL_ENABLED=true")
 	}
 	return nil
 }
