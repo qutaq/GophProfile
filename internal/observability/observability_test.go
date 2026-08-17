@@ -36,7 +36,7 @@ func TestInitTracerDisabled(t *testing.T) {
 func TestMetricsHandler(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	MetricsHandler().ServeHTTP(rec, req)
+	NewMetrics(nil).Handler().ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "go_goroutines")
 }
@@ -91,16 +91,6 @@ func TestParseLevel(t *testing.T) {
 	require.Equal(t, slog.LevelInfo, parseLevel("unknown"))
 }
 
-func TestLoggerFromContext(t *testing.T) {
-	require.Equal(t, slog.Default(), LoggerFromContext(context.Background()))
-
-	var buf bytes.Buffer
-	logger := newLogger(&buf, "info", "svc")
-	ctx := WithLogger(context.Background(), logger)
-	LoggerFromContext(ctx).Info("from-ctx")
-	require.Contains(t, buf.String(), `"msg":"from-ctx"`)
-}
-
 func TestTraceHandlerWithAttrsAndGroup(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newLogger(&buf, "info", "svc").With("a", 1).WithGroup("g")
@@ -144,25 +134,26 @@ func TestStartSpanKind(t *testing.T) {
 	require.Equal(t, trace.SpanKindClient, got.SpanKind())
 }
 
-func scrapeMetrics(t *testing.T) string {
+func scrapeMetrics(t *testing.T, m *Metrics) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	require.Equal(t, http.StatusOK, rec.Code)
 	return rec.Body.String()
 }
 
 func TestObserveBusinessMetrics(t *testing.T) {
-	ObserveUpload(StatusSuccess, 10*time.Millisecond)
-	ObserveDelete(StatusRejected)
-	ObserveProcessing(ResultCompleted, 20*time.Millisecond)
-	ObserveThumbnail("100x100")
-	ObservePublish("avatar.uploaded")
-	ObserveConsume("avatars.upload", StatusSuccess)
-	ConsumerInFlightInc()
-	ConsumerInFlightDec()
+	m := NewTestMetrics()
+	m.ObserveUpload(StatusSuccess, 10*time.Millisecond)
+	m.ObserveDelete(StatusRejected)
+	m.ObserveProcessing(ResultCompleted, 20*time.Millisecond)
+	m.ObserveThumbnail("100x100")
+	m.ObservePublish("avatar.uploaded")
+	m.ObserveConsume("avatars.upload", StatusSuccess)
+	m.ConsumerInFlightInc()
+	m.ConsumerInFlightDec()
 
-	body := scrapeMetrics(t)
+	body := scrapeMetrics(t, m)
 	require.Contains(t, body, `avatars_uploads_total{status="success"}`)
 	require.Contains(t, body, "avatars_upload_duration_seconds")
 	require.Contains(t, body, `avatars_deletes_total{status="rejected"}`)
@@ -172,6 +163,29 @@ func TestObserveBusinessMetrics(t *testing.T) {
 	require.Contains(t, body, `rabbitmq_messages_published_total{routing_key="avatar.uploaded"}`)
 	require.Contains(t, body, `rabbitmq_messages_consumed_total{queue="avatars.upload",result="success"}`)
 	require.Contains(t, body, "rabbitmq_consumer_in_flight")
+
+	other := scrapeMetrics(t, NewTestMetrics())
+	require.NotContains(t, other, `avatars_uploads_total{status="success"}`)
+}
+
+func TestNilMetricsMethodsDoNotPanic(t *testing.T) {
+	var m *Metrics
+	m.ObserveUpload(StatusSuccess, time.Millisecond)
+	m.ObserveDelete(StatusRejected)
+	m.ObserveProcessing(ResultCompleted, time.Millisecond)
+	m.ObserveThumbnail("100x100")
+	m.ObservePublish("avatar.uploaded")
+	m.ObserveConsume("avatars.upload", StatusSuccess)
+	m.ConsumerInFlightInc()
+	m.ConsumerInFlightDec()
+	m.HTTPInFlightInc()
+	m.HTTPInFlightDec()
+	m.ObserveHTTP(http.MethodGet, "/health", http.StatusOK, 0.01)
+	m.RegisterDBPool(nil)
+	m.CollectStorageBytes(context.Background(), nil, 0, nil)
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestSkipHTTPMetrics(t *testing.T) {
@@ -182,10 +196,11 @@ func TestSkipHTTPMetrics(t *testing.T) {
 }
 
 func TestCollectStorageBytes(t *testing.T) {
+	m := NewTestMetrics()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		CollectStorageBytes(ctx, func(context.Context) (int64, error) {
+		m.CollectStorageBytes(ctx, func(context.Context) (int64, error) {
 			return 42, nil
 		}, 15*time.Millisecond, slog.New(slog.DiscardHandler))
 		close(done)
@@ -194,19 +209,19 @@ func TestCollectStorageBytes(t *testing.T) {
 	cancel()
 	<-done
 
-	require.Contains(t, scrapeMetrics(t), "avatars_storage_bytes 42")
+	require.Contains(t, scrapeMetrics(t, m), "avatars_storage_bytes 42")
 }
 
 func TestCollectStorageBytesQueryError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	CollectStorageBytes(ctx, func(context.Context) (int64, error) {
+	NewTestMetrics().CollectStorageBytes(ctx, func(context.Context) (int64, error) {
 		return 0, errors.New("db down")
 	}, 5*time.Millisecond, slog.New(slog.DiscardHandler))
 }
 
 func TestNewMetricsServer(t *testing.T) {
-	srv := NewMetricsServer("127.0.0.1:0", "/metrics")
+	srv := NewMetricsServer("127.0.0.1:0", "/metrics", NewMetrics(nil))
 	require.NotNil(t, srv)
 	rec := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
@@ -214,7 +229,7 @@ func TestNewMetricsServer(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "go_goroutines")
 }
 
-func TestAccessLogIncludesRouteStatusAndTrace(t *testing.T) {
+func TestHTTPMiddlewareIncludesRouteStatusAndTrace(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newLogger(&buf, "info", "gophprofile-server")
 
@@ -222,9 +237,8 @@ func TestAccessLogIncludesRouteStatusAndTrace(t *testing.T) {
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
 	r := chi.NewRouter()
-	r.Use(AccessLog(logger, "/metrics"))
-	r.Get("/api/v1/users/{user_id}/avatars", func(w http.ResponseWriter, req *http.Request) {
-		require.Equal(t, logger, LoggerFromContext(req.Context()))
+	r.Use(HTTPMiddleware(logger, "/metrics", nil))
+	r.Get("/api/v1/users/{user_id}/avatars", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -252,12 +266,12 @@ func TestAccessLogIncludesRouteStatusAndTrace(t *testing.T) {
 	require.True(t, hasDuration)
 }
 
-func TestAccessLogSkipsMetricsAndStatic(t *testing.T) {
+func TestHTTPMiddlewareSkipsMetricsAndStatic(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newLogger(&buf, "info", "svc")
 
 	r := chi.NewRouter()
-	r.Use(AccessLog(logger, "/metrics"))
+	r.Use(HTTPMiddleware(logger, "/metrics", nil))
 	r.Get("/metrics", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	r.Get("/web/static/app.css", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -273,9 +287,9 @@ func TestAccessLogSkipsMetricsAndStatic(t *testing.T) {
 	require.Equal(t, "/health", payload["route"])
 }
 
-func TestAccessLogNilLoggerDoesNotPanic(t *testing.T) {
+func TestHTTPMiddlewareNilLoggerDoesNotPanic(t *testing.T) {
 	r := chi.NewRouter()
-	r.Use(AccessLog(nil, ""))
+	r.Use(HTTPMiddleware(nil, "", nil))
 	r.Get("/ping", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ping", nil))

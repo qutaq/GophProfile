@@ -36,7 +36,8 @@ func TestWorker_HandleUploadSpans(t *testing.T) {
 		ProcessingStatus: domain.ProcessingStatusProcessing,
 		ThumbnailS3Keys:  domain.ThumbnailKeys{},
 	}}
-	w := worker.New(repo, storage, nil)
+	metrics := observability.NewTestMetrics()
+	w := worker.New(repo, storage, nil, metrics)
 	body, err := json.Marshal(events.AvatarUploadEvent{
 		AvatarID: avatarID,
 		UserID:   userID,
@@ -50,9 +51,9 @@ func TestWorker_HandleUploadSpans(t *testing.T) {
 	require.Equal(t, avatarID, observability.SpanAttr(upload, "avatar.id"))
 	require.Equal(t, 2, observability.CountSpans(rec, "worker.resize"))
 
-	metrics := httptest.NewRecorder()
-	observability.MetricsHandler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	got := metrics.Body.String()
+	recMetrics := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(recMetrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	got := recMetrics.Body.String()
 	require.Contains(t, got, `avatars_processing_total{result="completed"}`)
 	require.Contains(t, got, `avatars_thumbnails_generated_total{size="100x100"}`)
 	require.Contains(t, got, `avatars_thumbnails_generated_total{size="300x300"}`)
@@ -62,7 +63,7 @@ func TestWorker_HandleUploadBadJSONRecordsError(t *testing.T) {
 	rec, cleanup := observability.NewTestTracer()
 	t.Cleanup(cleanup)
 
-	w := worker.New(&memRepo{}, newMemStorage(), nil)
+	w := worker.New(&memRepo{}, newMemStorage(), nil, nil)
 	err := w.HandleUpload(context.Background(), []byte(`{`), "m1")
 	require.Error(t, err)
 
@@ -75,7 +76,7 @@ func TestWorker_HandleDeleteSpan(t *testing.T) {
 	rec, cleanup := observability.NewTestTracer()
 	t.Cleanup(cleanup)
 
-	w := worker.New(&memRepo{}, newMemStorage(), nil)
+	w := worker.New(&memRepo{}, newMemStorage(), nil, nil)
 	body, err := json.Marshal(events.AvatarDeleteEvent{AvatarID: "id", S3Keys: nil})
 	require.NoError(t, err)
 	require.NoError(t, w.HandleDelete(context.Background(), body, "msg"))
@@ -104,7 +105,7 @@ func TestWorker_HandleUploadLogsTrace(t *testing.T) {
 		S3Key:            key,
 		ProcessingStatus: domain.ProcessingStatusProcessing,
 		ThumbnailS3Keys:  domain.ThumbnailKeys{},
-	}}, storage, logger)
+	}}, storage, logger, nil)
 
 	ctx, span := observability.StartSpan(context.Background(), "rabbitmq.consume")
 	defer span.End()

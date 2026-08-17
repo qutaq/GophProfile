@@ -20,9 +20,10 @@ type Publisher struct {
 	conn     *amqp.Connection
 	ch       *amqp.Channel
 	exchange string
+	metrics  *observability.Metrics
 }
 
-func NewPublisher(cfg Config) (*Publisher, error) {
+func NewPublisher(cfg Config, metrics *observability.Metrics) (*Publisher, error) {
 	conn, err := amqp.Dial(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("dial rabbitmq: %w", err)
@@ -40,7 +41,7 @@ func NewPublisher(cfg Config) (*Publisher, error) {
 		return nil, err
 	}
 
-	return &Publisher{conn: conn, ch: ch, exchange: cfg.Exchange}, nil
+	return &Publisher{conn: conn, ch: ch, exchange: cfg.Exchange, metrics: metrics}, nil
 }
 
 type Config struct {
@@ -115,7 +116,7 @@ func (p *Publisher) publish(ctx context.Context, routingKey, messageKey string, 
 			},
 		)
 		if err == nil {
-			observability.ObservePublish(routingKey)
+			p.metrics.ObservePublish(routingKey)
 			return nil
 		}
 		lastErr = err

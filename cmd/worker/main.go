@@ -57,7 +57,8 @@ func main() {
 	}
 	defer db.Close()
 
-	observability.RegisterDBPool(db)
+	metrics := observability.NewMetrics(nil)
+	metrics.RegisterDBPool(db)
 
 	s3Client, err := infras3.NewClient(cfg.S3)
 	if err != nil {
@@ -68,7 +69,7 @@ func main() {
 	consumer, err := rabbitmq.NewConsumer(rabbitmq.Config{
 		URL:      cfg.RabbitMQ.URL,
 		Exchange: cfg.RabbitMQ.Exchange,
-	}, logger)
+	}, logger, metrics)
 	if err != nil {
 		logger.Error("rabbitmq consumer", "err", err)
 		os.Exit(1)
@@ -77,14 +78,14 @@ func main() {
 
 	avatarRepo := repository.NewAvatarRepository(db)
 	storage := repository.NewS3Storage(s3Client, cfg.S3.Bucket)
-	w := worker.New(avatarRepo, storage, logger)
+	w := worker.New(avatarRepo, storage, logger, metrics)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	g, ctx := errgroup.WithContext(ctx)
 	if cfg.Observability.MetricsAddr != "" {
-		metricsSrv := observability.NewMetricsServer(cfg.Observability.MetricsAddr, cfg.Observability.MetricsPath)
+		metricsSrv := observability.NewMetricsServer(cfg.Observability.MetricsAddr, cfg.Observability.MetricsPath, metrics)
 		g.Go(func() error {
 			logger.Info("worker metrics listening", "addr", cfg.Observability.MetricsAddr)
 			err := metricsSrv.ListenAndServe()

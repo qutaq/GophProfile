@@ -52,7 +52,8 @@ func main() {
 	}
 	defer db.Close()
 
-	observability.RegisterDBPool(db)
+	metrics := observability.NewMetrics(nil)
+	metrics.RegisterDBPool(db)
 
 	s3Client, err := infras3.NewClient(cfg.S3)
 	if err != nil {
@@ -70,7 +71,7 @@ func main() {
 	publisher, err := rabbitmq.NewPublisher(rabbitmq.Config{
 		URL:      cfg.RabbitMQ.URL,
 		Exchange: cfg.RabbitMQ.Exchange,
-	})
+	}, metrics)
 	if err != nil {
 		logger.Error("rabbitmq publisher", "err", err)
 		os.Exit(1)
@@ -79,7 +80,7 @@ func main() {
 
 	avatarRepo := repository.NewAvatarRepository(db)
 	storage := repository.NewS3Storage(s3Client, cfg.S3.Bucket)
-	avatarSvc := services.NewAvatarService(avatarRepo, storage, publisher, cfg.Upload.MaxSizeBytes, logger)
+	avatarSvc := services.NewAvatarService(avatarRepo, storage, publisher, cfg.Upload.MaxSizeBytes, logger, metrics)
 
 	webHandler, err := handlers.NewWebHandler(avatarSvc, "web")
 	if err != nil {
@@ -98,7 +99,7 @@ func main() {
 	runCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	go observability.CollectStorageBytes(runCtx, avatarRepo.SumActiveSizeBytes, 15*time.Second, logger)
+	go metrics.CollectStorageBytes(runCtx, avatarRepo.SumActiveSizeBytes, 15*time.Second, logger)
 
 	router := api.NewRouter(api.Handlers{
 		Avatars:     handlers.NewAvatarHandler(avatarSvc),
@@ -107,6 +108,7 @@ func main() {
 		WebDir:      "web",
 		MetricsPath: cfg.Observability.MetricsPath,
 		Logger:      logger,
+		Metrics:     metrics,
 	})
 
 	server := &http.Server{

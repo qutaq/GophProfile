@@ -3,7 +3,6 @@ package observability
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -11,8 +10,6 @@ import (
 )
 
 const defaultStorageInterval = 15 * time.Second
-
-var registerDBPoolOnce sync.Once
 
 type dbPoolCollector struct {
 	pool     *pgxpool.Pool
@@ -55,17 +52,15 @@ func (c *dbPoolCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.max, prometheus.GaugeValue, float64(stat.MaxConns()))
 }
 
-func RegisterDBPool(pool *pgxpool.Pool) {
-	if pool == nil {
+func (m *Metrics) RegisterDBPool(pool *pgxpool.Pool) {
+	if m == nil || pool == nil {
 		return
 	}
-	registerDBPoolOnce.Do(func() {
-		prometheus.MustRegister(newDBPoolCollector(pool))
-	})
+	m.registerer.MustRegister(newDBPoolCollector(pool))
 }
 
-func CollectStorageBytes(ctx context.Context, query func(context.Context) (int64, error), interval time.Duration, log *slog.Logger) {
-	if query == nil {
+func (m *Metrics) CollectStorageBytes(ctx context.Context, query func(context.Context) (int64, error), interval time.Duration, log *slog.Logger) {
+	if m == nil || query == nil {
 		return
 	}
 	if log == nil {
@@ -81,7 +76,7 @@ func CollectStorageBytes(ctx context.Context, query func(context.Context) (int64
 			log.WarnContext(ctx, "collect storage bytes", "err", err)
 			return
 		}
-		avatarsStorageBytes.Set(float64(n))
+		m.avatarsStorageBytes.Set(float64(n))
 	}
 
 	update()

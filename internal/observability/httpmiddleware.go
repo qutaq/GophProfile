@@ -3,7 +3,6 @@ package observability
 import (
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -11,7 +10,13 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-func HTTPMetrics(metricsPath string) func(http.Handler) http.Handler {
+// HTTPMiddleware records Prometheus HTTP metrics and writes a JSON access log
+// with a single WrapResponseWriter and one next.ServeHTTP call.
+// /metrics and /web/static are skipped.
+func HTTPMiddleware(logger *slog.Logger, metricsPath string, metrics *Metrics) func(http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	if metricsPath == "" {
 		metricsPath = "/metrics"
 	}
@@ -22,8 +27,8 @@ func HTTPMetrics(metricsPath string) func(http.Handler) http.Handler {
 				return
 			}
 
-			httpRequestsInFlight.Inc()
-			defer httpRequestsInFlight.Dec()
+			metrics.HTTPInFlightInc()
+			defer metrics.HTTPInFlightDec()
 
 			start := time.Now()
 			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
@@ -34,44 +39,12 @@ func HTTPMetrics(metricsPath string) func(http.Handler) http.Handler {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			httpRequestsTotal.WithLabelValues(r.Method, route, strconv.Itoa(status)).Inc()
-			httpRequestDuration.WithLabelValues(r.Method, route).Observe(time.Since(start).Seconds())
-		})
-	}
-}
 
-func skipHTTPMetrics(path, metricsPath string) bool {
-	return path == metricsPath || strings.HasPrefix(path, "/web/static")
-}
+			metrics.ObserveHTTP(r.Method, route, status, time.Since(start).Seconds())
 
-// AccessLog writes a JSON access line (method, route, status, duration) with trace_id.
-// /metrics and /web/static are skipped. Logger is stored on the request context.
-func AccessLog(logger *slog.Logger, metricsPath string) func(http.Handler) http.Handler {
-	if logger == nil {
-		logger = slog.New(slog.DiscardHandler)
-	}
-	if metricsPath == "" {
-		metricsPath = "/metrics"
-	}
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(WithLogger(r.Context(), logger))
-			if skipHTTPMetrics(r.URL.Path, metricsPath) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			start := time.Now()
-			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-			next.ServeHTTP(ww, r)
-
-			status := ww.Status()
-			if status == 0 {
-				status = http.StatusOK
-			}
 			attrs := []any{
 				"method", r.Method,
-				"route", routePattern(r),
+				"route", route,
 				"status", status,
 				"duration_ms", time.Since(start).Milliseconds(),
 				"bytes", ww.BytesWritten(),
@@ -85,6 +58,10 @@ func AccessLog(logger *slog.Logger, metricsPath string) func(http.Handler) http.
 			logger.InfoContext(r.Context(), "http request", attrs...)
 		})
 	}
+}
+
+func skipHTTPMetrics(path, metricsPath string) bool {
+	return path == metricsPath || strings.HasPrefix(path, "/web/static")
 }
 
 func routePattern(r *http.Request) string {

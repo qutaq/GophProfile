@@ -22,6 +22,7 @@ type Handlers struct {
 	WebDir      string
 	MetricsPath string
 	Logger      *slog.Logger
+	Metrics     *observability.Metrics
 }
 
 func NewRouter(h Handlers) http.Handler {
@@ -43,11 +44,10 @@ func NewRouter(h Handlers) http.Handler {
 		}),
 	))
 	r.Use(withUserIDSpan)
-	r.Use(observability.AccessLog(h.Logger, metricsPath))
-	r.Use(observability.HTTPMetrics(metricsPath))
+	r.Use(observability.HTTPMiddleware(h.Logger, metricsPath, h.Metrics))
 	r.Use(middleware.Recoverer)
 
-	r.Handle(metricsPath, observability.MetricsHandler())
+	r.Handle(metricsPath, h.Metrics.Handler())
 
 	r.Get("/health", h.Health.Health)
 

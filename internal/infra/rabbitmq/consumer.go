@@ -2,7 +2,6 @@ package rabbitmq
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -22,9 +21,10 @@ type Consumer struct {
 	ch       *amqp.Channel
 	exchange string
 	log      *slog.Logger
+	metrics  *observability.Metrics
 }
 
-func NewConsumer(cfg Config, logger *slog.Logger) (*Consumer, error) {
+func NewConsumer(cfg Config, logger *slog.Logger, metrics *observability.Metrics) (*Consumer, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
@@ -53,7 +53,7 @@ func NewConsumer(cfg Config, logger *slog.Logger) (*Consumer, error) {
 		return nil, fmt.Errorf("qos: %w", err)
 	}
 
-	return &Consumer{conn: conn, ch: ch, exchange: cfg.Exchange, log: logger}, nil
+	return &Consumer{conn: conn, ch: ch, exchange: cfg.Exchange, log: logger, metrics: metrics}, nil
 }
 
 func (c *Consumer) Close() error {
@@ -111,21 +111,20 @@ func (c *Consumer) handleDelivery(ctx context.Context, queue string, d amqp.Deli
 	)
 	defer span.End()
 
-	observability.ConsumerInFlightInc()
-	defer observability.ConsumerInFlightDec()
+	c.metrics.ConsumerInFlightInc()
+	defer c.metrics.ConsumerInFlightDec()
 
 	err := retryWithBackoff(ctx, c.log, maxRetries, func() error {
 		return handler(ctx, d.Body, msgID)
 	})
 	if err != nil {
 		observability.RecordError(span, err)
-		observability.ObserveConsume(queue, observability.StatusError)
-		attrs := append([]any{"queue", queue, "message_id", msgID, "err", err}, eventLogAttrs(d.Body)...)
-		c.log.ErrorContext(ctx, "message failed", attrs...)
+		c.metrics.ObserveConsume(queue, observability.StatusError)
+		c.log.ErrorContext(ctx, "message failed", "queue", queue, "message_id", msgID, "err", err)
 		_ = d.Nack(false, false)
 		return
 	}
-	observability.ObserveConsume(queue, observability.StatusSuccess)
+	c.metrics.ObserveConsume(queue, observability.StatusSuccess)
 	_ = d.Ack(false)
 }
 
@@ -155,22 +154,4 @@ func retryWithBackoff(ctx context.Context, logger *slog.Logger, attempts int, fn
 		}
 	}
 	return err
-}
-
-func eventLogAttrs(body []byte) []any {
-	var meta struct {
-		AvatarID string `json:"avatar_id"`
-		UserID   string `json:"user_id"`
-	}
-	if json.Unmarshal(body, &meta) != nil {
-		return nil
-	}
-	attrs := make([]any, 0, 4)
-	if meta.AvatarID != "" {
-		attrs = append(attrs, "avatar_id", meta.AvatarID)
-	}
-	if meta.UserID != "" {
-		attrs = append(attrs, "user_id", meta.UserID)
-	}
-	return attrs
 }

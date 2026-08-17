@@ -170,7 +170,7 @@ func jpegBytes() []byte {
 func TestAvatarService_UploadGetDelete(t *testing.T) {
 	store := newMemStore()
 	storage := newMemStorage()
-	svc := services.NewAvatarService(store, storage, services.NoopPublisher{}, 1024, nil)
+	svc := services.NewAvatarService(store, storage, services.NoopPublisher{}, 1024, nil, nil)
 
 	ctx := context.Background()
 	payload := jpegBytes()
@@ -211,7 +211,7 @@ func TestAvatarService_UploadGetDelete(t *testing.T) {
 }
 
 func TestAvatarService_RejectInvalidAndLarge(t *testing.T) {
-	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 16, nil)
+	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 16, nil, nil)
 	ctx := context.Background()
 
 	_, err := svc.Upload(ctx, services.UploadInput{

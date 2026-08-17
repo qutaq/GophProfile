@@ -44,9 +44,10 @@ type AvatarService struct {
 	maxSize    int64
 	publicBase string
 	log        *slog.Logger
+	metrics    *observability.Metrics
 }
 
-func NewAvatarService(repo AvatarStore, storage ObjectStorage, publisher EventPublisher, maxSize int64, logger *slog.Logger) *AvatarService {
+func NewAvatarService(repo AvatarStore, storage ObjectStorage, publisher EventPublisher, maxSize int64, logger *slog.Logger, metrics *observability.Metrics) *AvatarService {
 	if maxSize <= 0 {
 		maxSize = 10 * 1024 * 1024
 	}
@@ -63,6 +64,7 @@ func NewAvatarService(repo AvatarStore, storage ObjectStorage, publisher EventPu
 		maxSize:    maxSize,
 		publicBase: "/api/v1/avatars",
 		log:        logger.With("component", "avatar-service"),
+		metrics:    metrics,
 	}
 }
 
@@ -91,7 +93,7 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (*UploadResu
 	start := time.Now()
 	result, err := s.upload(ctx, in)
 	status := classifyUpload(err)
-	observability.ObserveUpload(status, time.Since(start))
+	s.metrics.ObserveUpload(status, time.Since(start))
 	if err != nil {
 		observability.RecordError(span, err)
 		return nil, err
@@ -285,7 +287,7 @@ func (s *AvatarService) Delete(ctx context.Context, avatarID, userID string) err
 	defer span.End()
 
 	err := s.delete(ctx, avatarID, userID)
-	observability.ObserveDelete(classifyDelete(err))
+	s.metrics.ObserveDelete(classifyDelete(err))
 	if err != nil {
 		observability.RecordError(span, err)
 		return err
@@ -324,17 +326,17 @@ func (s *AvatarService) delete(ctx context.Context, avatarID, userID string) err
 
 func (s *AvatarService) DeleteUserAvatar(ctx context.Context, pathUserID, headerUserID string) error {
 	if strings.TrimSpace(headerUserID) == "" {
-		observability.ObserveDelete(observability.StatusRejected)
+		s.metrics.ObserveDelete(observability.StatusRejected)
 		return domain.ErrMissingUserID
 	}
 	if pathUserID != headerUserID {
-		observability.ObserveDelete(observability.StatusRejected)
+		s.metrics.ObserveDelete(observability.StatusRejected)
 		return domain.ErrForbidden
 	}
 
 	avatar, err := s.repo.GetByUserID(ctx, pathUserID)
 	if err != nil {
-		observability.ObserveDelete(classifyDelete(err))
+		s.metrics.ObserveDelete(classifyDelete(err))
 		return err
 	}
 	return s.Delete(ctx, avatar.ID, headerUserID)

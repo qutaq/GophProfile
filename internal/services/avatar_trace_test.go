@@ -20,7 +20,8 @@ func TestAvatarService_UploadAndDeleteSpans(t *testing.T) {
 	rec, cleanup := observability.NewTestTracer()
 	t.Cleanup(cleanup)
 
-	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024*1024, nil)
+	metrics := observability.NewTestMetrics()
+	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024*1024, nil, metrics)
 	ctx := context.Background()
 	payload := jpegBytes()
 
@@ -45,16 +46,16 @@ func TestAvatarService_UploadAndDeleteSpans(t *testing.T) {
 	require.NoError(t, svc.Delete(ctx, result.Avatar.ID, "user-1"))
 	require.NotNil(t, observability.EndedSpan(rec, "avatar.delete"))
 
-	metrics := httptest.NewRecorder()
-	observability.MetricsHandler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	require.Contains(t, metrics.Body.String(), `avatars_deletes_total{status="success"}`)
+	got := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	require.Contains(t, got.Body.String(), `avatars_deletes_total{status="success"}`)
 }
 
 func TestAvatarService_GetByIDRecordsError(t *testing.T) {
 	rec, cleanup := observability.NewTestTracer()
 	t.Cleanup(cleanup)
 
-	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil)
+	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil, nil)
 	_, err := svc.GetByID(context.Background(), "missing")
 	require.ErrorIs(t, err, domain.ErrNotFound)
 
@@ -67,7 +68,8 @@ func TestAvatarService_UploadRejectsMissingUser(t *testing.T) {
 	rec, cleanup := observability.NewTestTracer()
 	t.Cleanup(cleanup)
 
-	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil)
+	metrics := observability.NewTestMetrics()
+	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil, metrics)
 	_, err := svc.Upload(context.Background(), services.UploadInput{FileName: "a.jpg"})
 	require.True(t, errors.Is(err, domain.ErrMissingUserID))
 
@@ -75,9 +77,9 @@ func TestAvatarService_UploadRejectsMissingUser(t *testing.T) {
 	require.NotNil(t, span)
 	require.Equal(t, codes.Error, span.Status().Code)
 
-	metrics := httptest.NewRecorder()
-	observability.MetricsHandler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	require.Contains(t, metrics.Body.String(), `avatars_uploads_total{status="rejected"}`)
+	got := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	require.Contains(t, got.Body.String(), `avatars_uploads_total{status="rejected"}`)
 }
 
 func TestAvatarService_UploadLogsTraceUserAndAvatar(t *testing.T) {
@@ -86,7 +88,7 @@ func TestAvatarService_UploadLogsTraceUserAndAvatar(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := observability.NewLoggerTo(&buf, "info", "gophprofile-server")
-	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024*1024, logger)
+	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024*1024, logger, nil)
 
 	ctx, span := observability.StartSpan(context.Background(), "http")
 	defer span.End()

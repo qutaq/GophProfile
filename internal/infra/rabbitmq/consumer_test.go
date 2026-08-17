@@ -53,12 +53,6 @@ func TestRetryWithBackoffExhausted(t *testing.T) {
 	}
 }
 
-func TestEventLogAttrs(t *testing.T) {
-	require.Equal(t, []any{"avatar_id", "a1", "user_id", "u1"}, eventLogAttrs([]byte(`{"avatar_id":"a1","user_id":"u1"}`)))
-	require.Equal(t, []any{"avatar_id", "a1"}, eventLogAttrs([]byte(`{"avatar_id":"a1"}`)))
-	require.Nil(t, eventLogAttrs([]byte(`{`)))
-}
-
 func TestRetryWithBackoffLogsTrace(t *testing.T) {
 	_, cleanup := observability.NewTestTracer()
 	t.Cleanup(cleanup)

@@ -14,7 +14,7 @@ import (
 func TestAvatarService_MaxSizeDefaultAndGetByUserID(t *testing.T) {
 	store := newMemStore()
 	storage := newMemStorage()
-	svc := services.NewAvatarService(store, storage, nil, 0, nil)
+	svc := services.NewAvatarService(store, storage, nil, 0, nil, nil)
 	require.Equal(t, int64(10*1024*1024), svc.MaxSize())
 
 	ctx := context.Background()
@@ -37,7 +37,7 @@ func TestAvatarService_MaxSizeDefaultAndGetByUserID(t *testing.T) {
 }
 
 func TestAvatarService_DetectMIMEFromExtension(t *testing.T) {
-	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil)
+	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil, nil)
 	ctx := context.Background()
 
 	// Bytes that DetectContentType treats as octet-stream; extension decides MIME.
@@ -81,7 +81,7 @@ func TestAvatarService_DetectMIMEFromExtension(t *testing.T) {
 }
 
 func TestAvatarService_DeleteUserAvatarMissingHeader(t *testing.T) {
-	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil)
+	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil, nil)
 	err := svc.DeleteUserAvatar(context.Background(), "u", "")
 	require.ErrorIs(t, err, domain.ErrMissingUserID)
 }

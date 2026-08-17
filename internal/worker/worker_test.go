@@ -101,7 +101,7 @@ func TestWorker_HandleUploadIdempotent(t *testing.T) {
 		ThumbnailS3Keys:  domain.ThumbnailKeys{},
 	}}
 
-	w := worker.New(repo, storage, nil)
+	w := worker.New(repo, storage, nil, nil)
 	body, _ := json.Marshal(events.AvatarUploadEvent{
 		AvatarID: avatarID,
 		UserID:   userID,
@@ -129,7 +129,7 @@ func TestWorker_HandleDelete(t *testing.T) {
 	_ = storage.Upload(context.Background(), "a", "image/jpeg", bytes.NewReader([]byte("1")), 1)
 	_ = storage.Upload(context.Background(), "b", "image/jpeg", bytes.NewReader([]byte("2")), 1)
 
-	w := worker.New(&memRepo{}, storage, nil)
+	w := worker.New(&memRepo{}, storage, nil, nil)
 	body, _ := json.Marshal(events.AvatarDeleteEvent{
 		AvatarID: "id",
 		S3Keys:   []string{"a", "b"},
