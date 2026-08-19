@@ -17,7 +17,7 @@ import (
 func TestAvatarService_GetImageSizesAndList(t *testing.T) {
 	store := newMemStore()
 	storage := newMemStorage()
-	svc := services.NewAvatarService(store, storage, nil, 1024*1024, nil)
+	svc := services.NewAvatarService(store, storage, nil, 1024*1024, nil, nil)
 	ctx := context.Background()
 
 	payload := jpegBytes()
@@ -65,7 +65,7 @@ func TestAvatarService_GetImageSizesAndList(t *testing.T) {
 func TestAvatarService_DeleteUserAvatar(t *testing.T) {
 	store := newMemStore()
 	storage := newMemStorage()
-	svc := services.NewAvatarService(store, storage, nil, 1024, nil)
+	svc := services.NewAvatarService(store, storage, nil, 1024, nil, nil)
 	ctx := context.Background()
 
 	payload := jpegBytes()
@@ -89,7 +89,7 @@ func TestAvatarService_DeleteUserAvatar(t *testing.T) {
 }
 
 func TestAvatarService_MissingUserIDAndEmptyFile(t *testing.T) {
-	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil)
+	svc := services.NewAvatarService(newMemStore(), newMemStorage(), nil, 1024, nil, nil)
 
 	_, err := svc.Upload(context.Background(), services.UploadInput{
 		FileName: "a.jpg",

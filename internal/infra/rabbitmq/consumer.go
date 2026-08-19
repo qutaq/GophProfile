@@ -7,6 +7,11 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/qutaq/GophProfile/internal/observability"
 )
 
 type MessageHandler func(ctx context.Context, body []byte, messageID string) error
@@ -16,9 +21,10 @@ type Consumer struct {
 	ch       *amqp.Channel
 	exchange string
 	log      *slog.Logger
+	metrics  *observability.Metrics
 }
 
-func NewConsumer(cfg Config, logger *slog.Logger) (*Consumer, error) {
+func NewConsumer(cfg Config, logger *slog.Logger, metrics *observability.Metrics) (*Consumer, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
@@ -47,7 +53,7 @@ func NewConsumer(cfg Config, logger *slog.Logger) (*Consumer, error) {
 		return nil, fmt.Errorf("qos: %w", err)
 	}
 
-	return &Consumer{conn: conn, ch: ch, exchange: cfg.Exchange, log: logger}, nil
+	return &Consumer{conn: conn, ch: ch, exchange: cfg.Exchange, log: logger, metrics: metrics}, nil
 }
 
 func (c *Consumer) Close() error {
@@ -78,27 +84,47 @@ func (c *Consumer) Consume(ctx context.Context, queue string, handler MessageHan
 				return nil
 			}
 			// Finish the in-flight message even after shutdown is requested.
-			c.handleDelivery(context.WithoutCancel(ctx), d, handler)
+			c.handleDelivery(context.WithoutCancel(ctx), queue, d, handler)
 		}
 	}
 }
 
 const maxRetries = 5
 
-func (c *Consumer) handleDelivery(ctx context.Context, d amqp.Delivery, handler MessageHandler) {
+func (c *Consumer) handleDelivery(ctx context.Context, queue string, d amqp.Delivery, handler MessageHandler) {
 	msgID := d.MessageId
 	if msgID == "" {
 		msgID = fmt.Sprintf("generated-%d", time.Now().UnixNano())
 	}
 
+	headers := d.Headers
+	if headers == nil {
+		headers = amqp.Table{}
+	}
+	ctx = otel.GetTextMapPropagator().Extract(ctx, amqpHeaderCarrier(headers))
+
+	ctx, span := observability.StartSpanKind(ctx, "rabbitmq.consume", trace.SpanKindConsumer,
+		attribute.String("messaging.system", "rabbitmq"),
+		attribute.String("messaging.destination", queue),
+		attribute.String("messaging.operation", "consume"),
+		attribute.String("messaging.message_id", msgID),
+	)
+	defer span.End()
+
+	c.metrics.ConsumerInFlightInc()
+	defer c.metrics.ConsumerInFlightDec()
+
 	err := retryWithBackoff(ctx, c.log, maxRetries, func() error {
 		return handler(ctx, d.Body, msgID)
 	})
 	if err != nil {
-		c.log.Error("message failed after retries", "message_id", msgID, "err", err)
+		observability.RecordError(span, err)
+		c.metrics.ObserveConsume(queue, observability.StatusError)
+		c.log.ErrorContext(ctx, "message failed", "queue", queue, "message_id", msgID, "err", err)
 		_ = d.Nack(false, false)
 		return
 	}
+	c.metrics.ObserveConsume(queue, observability.StatusSuccess)
 	_ = d.Ack(false)
 }
 
@@ -115,7 +141,7 @@ func retryWithBackoff(ctx context.Context, logger *slog.Logger, attempts int, fn
 			break
 		}
 		backoff := time.Duration(1<<uint(i)) * 200 * time.Millisecond
-		logger.Warn("retrying message handler",
+		logger.WarnContext(ctx, "retrying message handler",
 			"attempt", i+1,
 			"max_attempts", attempts,
 			"backoff", backoff.String(),

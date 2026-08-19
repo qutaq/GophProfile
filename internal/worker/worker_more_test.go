@@ -11,11 +11,12 @@ import (
 
 	"github.com/qutaq/GophProfile/internal/domain"
 	"github.com/qutaq/GophProfile/internal/events"
+	"github.com/qutaq/GophProfile/internal/observability"
 	"github.com/qutaq/GophProfile/internal/worker"
 )
 
 func TestWorker_HandleUploadNotFoundAndBadJSON(t *testing.T) {
-	w := worker.New(&memRepo{}, newMemStorage(), nil)
+	w := worker.New(&memRepo{}, newMemStorage(), nil, nil)
 
 	err := w.HandleUpload(context.Background(), []byte(`{`), "m1")
 	require.Error(t, err)
@@ -37,7 +38,7 @@ func TestWorker_HandleUploadDownloadAndResizeErrors(t *testing.T) {
 		ProcessingStatus: domain.ProcessingStatusProcessing,
 		ThumbnailS3Keys:  domain.ThumbnailKeys{},
 	}}
-	w := worker.New(repo, storage, nil)
+	w := worker.New(repo, storage, nil, nil)
 
 	body, _ := json.Marshal(events.AvatarUploadEvent{
 		AvatarID: "a1",
@@ -62,7 +63,7 @@ func TestWorker_HandleUploadDownloadAndResizeErrors(t *testing.T) {
 }
 
 func TestWorker_HandleDeleteBadJSONAndStorageError(t *testing.T) {
-	w := worker.New(&memRepo{}, &failingDeleteStorage{memStorage: *newMemStorage()}, nil)
+	w := worker.New(&memRepo{}, &failingDeleteStorage{memStorage: *newMemStorage()}, nil, nil)
 
 	err := w.HandleDelete(context.Background(), []byte(`{`), "m")
 	require.Error(t, err)
@@ -71,6 +72,49 @@ func TestWorker_HandleDeleteBadJSONAndStorageError(t *testing.T) {
 	err = w.HandleDelete(context.Background(), body, "m2")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "delete s3 objects")
+}
+
+func TestWorker_HandleUploadFailedLogsEventFields(t *testing.T) {
+	var buf bytes.Buffer
+	logger := observability.NewLoggerTo(&buf, "info", "gophprofile-worker")
+	storage := newMemStorage()
+	repo := &memRepo{avatar: &domain.Avatar{
+		ID:               "a1",
+		UserID:           "u1",
+		S3Key:            "missing-key",
+		ProcessingStatus: domain.ProcessingStatusProcessing,
+		ThumbnailS3Keys:  domain.ThumbnailKeys{},
+	}}
+	w := worker.New(repo, storage, logger, nil)
+
+	body, err := json.Marshal(events.AvatarUploadEvent{
+		AvatarID: "a1",
+		UserID:   "u1",
+		S3Key:    "missing-key",
+	})
+	require.NoError(t, err)
+	require.Error(t, w.HandleUpload(context.Background(), body, "msg-fail"))
+
+	got := buf.String()
+	require.Contains(t, got, `"msg":"handle upload failed"`)
+	require.Contains(t, got, `"avatar_id":"a1"`)
+	require.Contains(t, got, `"user_id":"u1"`)
+	require.Contains(t, got, `"message_id":"msg-fail"`)
+}
+
+func TestWorker_HandleDeleteFailedLogsEventFields(t *testing.T) {
+	var buf bytes.Buffer
+	logger := observability.NewLoggerTo(&buf, "info", "gophprofile-worker")
+	w := worker.New(&memRepo{}, &failingDeleteStorage{memStorage: *newMemStorage()}, logger, nil)
+
+	body, err := json.Marshal(events.AvatarDeleteEvent{AvatarID: "avatar-del", S3Keys: []string{"k"}})
+	require.NoError(t, err)
+	require.Error(t, w.HandleDelete(context.Background(), body, "msg-del"))
+
+	got := buf.String()
+	require.Contains(t, got, `"msg":"handle delete failed"`)
+	require.Contains(t, got, `"avatar_id":"avatar-del"`)
+	require.Contains(t, got, `"message_id":"msg-del"`)
 }
 
 type failingDeleteStorage struct {

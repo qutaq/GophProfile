@@ -3,17 +3,21 @@ package services
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/qutaq/GophProfile/internal/domain"
 	"github.com/qutaq/GophProfile/internal/events"
+	"github.com/qutaq/GophProfile/internal/observability"
 	"github.com/qutaq/GophProfile/internal/repository"
 )
 
@@ -40,9 +44,10 @@ type AvatarService struct {
 	maxSize    int64
 	publicBase string
 	log        *slog.Logger
+	metrics    *observability.Metrics
 }
 
-func NewAvatarService(repo AvatarStore, storage ObjectStorage, publisher EventPublisher, maxSize int64, logger *slog.Logger) *AvatarService {
+func NewAvatarService(repo AvatarStore, storage ObjectStorage, publisher EventPublisher, maxSize int64, logger *slog.Logger, metrics *observability.Metrics) *AvatarService {
 	if maxSize <= 0 {
 		maxSize = 10 * 1024 * 1024
 	}
@@ -59,6 +64,7 @@ func NewAvatarService(repo AvatarStore, storage ObjectStorage, publisher EventPu
 		maxSize:    maxSize,
 		publicBase: "/api/v1/avatars",
 		log:        logger.With("component", "avatar-service"),
+		metrics:    metrics,
 	}
 }
 
@@ -77,6 +83,25 @@ type UploadResult struct {
 }
 
 func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (*UploadResult, error) {
+	ctx, span := observability.StartSpan(ctx, "avatar.upload",
+		attribute.String("user.id", in.UserID),
+		attribute.String("file.name", in.FileName),
+		attribute.Int64("file.size", in.Size),
+	)
+	defer span.End()
+
+	start := time.Now()
+	result, err := s.upload(ctx, in)
+	status := classifyUpload(err)
+	s.metrics.ObserveUpload(status, time.Since(start))
+	if err != nil {
+		observability.RecordError(span, err)
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *AvatarService) upload(ctx context.Context, in UploadInput) (*UploadResult, error) {
 	if strings.TrimSpace(in.UserID) == "" {
 		return nil, domain.ErrMissingUserID
 	}
@@ -110,6 +135,14 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (*UploadResu
 		return nil, fmt.Errorf("create avatar: %w", err)
 	}
 
+	s.log.InfoContext(ctx, "uploading avatar",
+		"user_id", in.UserID,
+		"avatar_id", avatarID,
+		"file_size", int64(len(data)),
+		"mime_type", mimeType,
+		"file_name", in.FileName,
+	)
+
 	if err := s.storage.Upload(ctx, s3Key, mimeType, bytes.NewReader(data), int64(len(data))); err != nil {
 		_ = s.repo.UpdateUploadStatus(ctx, avatarID, domain.UploadStatusFailed)
 		_ = s.repo.UpdateProcessingStatus(ctx, avatarID, domain.ProcessingStatusFailed)
@@ -126,7 +159,7 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (*UploadResu
 		UserID:   in.UserID,
 		S3Key:    s3Key,
 	}); err != nil {
-		s.log.Error("publish upload event", "avatar_id", avatarID, "err", err)
+		s.log.ErrorContext(ctx, "publish upload event", "avatar_id", avatarID, "user_id", in.UserID, "err", err)
 	}
 
 	return &UploadResult{
@@ -137,7 +170,17 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (*UploadResu
 }
 
 func (s *AvatarService) GetByID(ctx context.Context, id string) (*domain.Avatar, error) {
-	return s.repo.GetByID(ctx, id)
+	ctx, span := observability.StartSpan(ctx, "avatar.metadata",
+		attribute.String("avatar.id", id),
+	)
+	defer span.End()
+
+	avatar, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		observability.RecordError(span, err)
+		return nil, err
+	}
+	return avatar, nil
 }
 
 func (s *AvatarService) GetByUserID(ctx context.Context, userID string) (*domain.Avatar, error) {
@@ -145,7 +188,17 @@ func (s *AvatarService) GetByUserID(ctx context.Context, userID string) (*domain
 }
 
 func (s *AvatarService) ListByUserID(ctx context.Context, userID string) ([]domain.Avatar, error) {
-	return s.repo.ListByUserID(ctx, userID)
+	ctx, span := observability.StartSpan(ctx, "avatar.list",
+		attribute.String("user.id", userID),
+	)
+	defer span.End()
+
+	avatars, err := s.repo.ListByUserID(ctx, userID)
+	if err != nil {
+		observability.RecordError(span, err)
+		return nil, err
+	}
+	return avatars, nil
 }
 
 type ImageContent struct {
@@ -155,19 +208,43 @@ type ImageContent struct {
 }
 
 func (s *AvatarService) GetImage(ctx context.Context, id, size string) (*ImageContent, error) {
+	ctx, span := observability.StartSpan(ctx, "avatar.get",
+		attribute.String("avatar.id", id),
+		attribute.String("image.size", size),
+	)
+	defer span.End()
+
 	avatar, err := s.repo.GetByID(ctx, id)
 	if err != nil {
+		observability.RecordError(span, err)
 		return nil, err
 	}
-	return s.openImage(ctx, avatar, size)
+	img, err := s.openImage(ctx, avatar, size)
+	if err != nil {
+		observability.RecordError(span, err)
+		return nil, err
+	}
+	return img, nil
 }
 
 func (s *AvatarService) GetUserImage(ctx context.Context, userID, size string) (*ImageContent, error) {
+	ctx, span := observability.StartSpan(ctx, "avatar.get",
+		attribute.String("user.id", userID),
+		attribute.String("image.size", size),
+	)
+	defer span.End()
+
 	avatar, err := s.repo.GetByUserID(ctx, userID)
 	if err != nil {
+		observability.RecordError(span, err)
 		return nil, err
 	}
-	return s.openImage(ctx, avatar, size)
+	img, err := s.openImage(ctx, avatar, size)
+	if err != nil {
+		observability.RecordError(span, err)
+		return nil, err
+	}
+	return img, nil
 }
 
 func (s *AvatarService) openImage(ctx context.Context, avatar *domain.Avatar, size string) (*ImageContent, error) {
@@ -203,6 +280,22 @@ func (s *AvatarService) openImage(ctx context.Context, avatar *domain.Avatar, si
 }
 
 func (s *AvatarService) Delete(ctx context.Context, avatarID, userID string) error {
+	ctx, span := observability.StartSpan(ctx, "avatar.delete",
+		attribute.String("avatar.id", avatarID),
+		attribute.String("user.id", userID),
+	)
+	defer span.End()
+
+	err := s.delete(ctx, avatarID, userID)
+	s.metrics.ObserveDelete(classifyDelete(err))
+	if err != nil {
+		observability.RecordError(span, err)
+		return err
+	}
+	return nil
+}
+
+func (s *AvatarService) delete(ctx context.Context, avatarID, userID string) error {
 	if strings.TrimSpace(userID) == "" {
 		return domain.ErrMissingUserID
 	}
@@ -220,25 +313,30 @@ func (s *AvatarService) Delete(ctx context.Context, avatarID, userID string) err
 		return err
 	}
 
+	s.log.InfoContext(ctx, "deleting avatar", "avatar_id", avatarID, "user_id", userID)
+
 	if err := s.publisher.PublishDelete(ctx, events.AvatarDeleteEvent{
 		AvatarID: avatarID,
 		S3Keys:   keys,
 	}); err != nil {
-		s.log.Error("publish delete event", "avatar_id", avatarID, "err", err)
+		s.log.ErrorContext(ctx, "publish delete event", "avatar_id", avatarID, "user_id", userID, "err", err)
 	}
 	return nil
 }
 
 func (s *AvatarService) DeleteUserAvatar(ctx context.Context, pathUserID, headerUserID string) error {
 	if strings.TrimSpace(headerUserID) == "" {
+		s.metrics.ObserveDelete(observability.StatusRejected)
 		return domain.ErrMissingUserID
 	}
 	if pathUserID != headerUserID {
+		s.metrics.ObserveDelete(observability.StatusRejected)
 		return domain.ErrForbidden
 	}
 
 	avatar, err := s.repo.GetByUserID(ctx, pathUserID)
 	if err != nil {
+		s.metrics.ObserveDelete(classifyDelete(err))
 		return err
 	}
 	return s.Delete(ctx, avatar.ID, headerUserID)
@@ -292,4 +390,30 @@ func isAllowedMIME(mimeType string) bool {
 	default:
 		return false
 	}
+}
+
+func classifyUpload(err error) string {
+	if err == nil {
+		return observability.StatusSuccess
+	}
+	if errors.Is(err, domain.ErrMissingUserID) ||
+		errors.Is(err, domain.ErrFileTooLarge) ||
+		errors.Is(err, domain.ErrEmptyFile) ||
+		errors.Is(err, domain.ErrInvalidFile) {
+		return observability.StatusRejected
+	}
+	return observability.StatusError
+}
+
+func classifyDelete(err error) string {
+	if err == nil {
+		return observability.StatusSuccess
+	}
+	if errors.Is(err, domain.ErrMissingUserID) ||
+		errors.Is(err, domain.ErrForbidden) ||
+		errors.Is(err, domain.ErrNotFound) ||
+		errors.Is(err, domain.ErrAlreadyDeleted) {
+		return observability.StatusRejected
+	}
+	return observability.StatusError
 }

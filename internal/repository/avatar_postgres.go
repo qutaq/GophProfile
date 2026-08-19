@@ -206,6 +206,15 @@ func (r *AvatarRepository) UpdateThumbnails(ctx context.Context, id string, keys
 	return r.execAffectingOne(ctx, q, id, raw)
 }
 
+func (r *AvatarRepository) SumActiveSizeBytes(ctx context.Context) (int64, error) {
+	const q = `SELECT COALESCE(SUM(size_bytes), 0) FROM avatars WHERE deleted_at IS NULL`
+	var total int64
+	if err := r.db.QueryRow(ctx, q).Scan(&total); err != nil {
+		return 0, fmt.Errorf("sum avatar size: %w", err)
+	}
+	return total, nil
+}
+
 func (r *AvatarRepository) execAffectingOne(ctx context.Context, q string, args ...any) error {
 	tag, err := r.db.Exec(ctx, q, args...)
 	if err != nil {

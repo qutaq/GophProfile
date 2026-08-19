@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qutaq/GophProfile/internal/config"
@@ -19,6 +20,7 @@ func Open(cfg config.DBConfig) (*pgxpool.Pool, error) {
 	poolCfg.MaxConns = 10
 	poolCfg.MinConns = 2
 	poolCfg.MaxConnIdleTime = 30 * time.Minute
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

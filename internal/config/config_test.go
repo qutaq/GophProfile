@@ -28,6 +28,13 @@ func TestLoadDefaults(t *testing.T) {
 		"RABBITMQ_URL",
 		"RABBITMQ_EXCHANGE",
 		"UPLOAD_MAX_SIZE_BYTES",
+		"OTEL_ENABLED",
+		"OTEL_SERVICE_NAME",
+		"OTEL_EXPORTER_OTLP_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_INSECURE",
+		"LOG_LEVEL",
+		"METRICS_PATH",
+		"METRICS_ADDR",
 	)
 
 	cfg, err := Load()
@@ -50,6 +57,27 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Upload.MaxSizeBytes != 10*1024*1024 {
 		t.Errorf("Upload.MaxSizeBytes = %d, want 10485760", cfg.Upload.MaxSizeBytes)
 	}
+	if !cfg.Observability.Enabled {
+		t.Error("Observability.Enabled = false, want true")
+	}
+	if cfg.Observability.ServiceName != "gophprofile-server" {
+		t.Errorf("Observability.ServiceName = %q, want gophprofile-server", cfg.Observability.ServiceName)
+	}
+	if cfg.Observability.OTLPEndpoint != "jaeger:4317" {
+		t.Errorf("Observability.OTLPEndpoint = %q, want jaeger:4317", cfg.Observability.OTLPEndpoint)
+	}
+	if !cfg.Observability.Insecure {
+		t.Error("Observability.Insecure = false, want true")
+	}
+	if cfg.Observability.LogLevel != "info" {
+		t.Errorf("Observability.LogLevel = %q, want info", cfg.Observability.LogLevel)
+	}
+	if cfg.Observability.MetricsPath != "/metrics" {
+		t.Errorf("Observability.MetricsPath = %q, want /metrics", cfg.Observability.MetricsPath)
+	}
+	if cfg.Observability.MetricsAddr != ":9091" {
+		t.Errorf("Observability.MetricsAddr = %q, want :9091", cfg.Observability.MetricsAddr)
+	}
 
 	dsn := cfg.DB.DSN()
 	wantDSN := "postgres://gophprofile:gophprofile@localhost:5432/gophprofile?sslmode=disable"
@@ -70,6 +98,13 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("RABBITMQ_URL", "amqp://user:pass@rabbit:5672/")
 	t.Setenv("RABBITMQ_EXCHANGE", "custom.exchange")
 	t.Setenv("UPLOAD_MAX_SIZE_BYTES", "2048")
+	t.Setenv("OTEL_ENABLED", "false")
+	t.Setenv("OTEL_SERVICE_NAME", "gophprofile-worker")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
+	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "false")
+	t.Setenv("LOG_LEVEL", "DEBUG")
+	t.Setenv("METRICS_PATH", "/prom")
+	t.Setenv("METRICS_ADDR", ":9191")
 
 	cfg, err := Load()
 	if err != nil {
@@ -87,6 +122,27 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.RabbitMQ.Exchange != "custom.exchange" {
 		t.Errorf("RabbitMQ.Exchange = %q, want custom.exchange", cfg.RabbitMQ.Exchange)
+	}
+	if cfg.Observability.Enabled {
+		t.Error("Observability.Enabled = true, want false")
+	}
+	if cfg.Observability.ServiceName != "gophprofile-worker" {
+		t.Errorf("Observability.ServiceName = %q, want gophprofile-worker", cfg.Observability.ServiceName)
+	}
+	if cfg.Observability.OTLPEndpoint != "localhost:4317" {
+		t.Errorf("Observability.OTLPEndpoint = %q, want localhost:4317", cfg.Observability.OTLPEndpoint)
+	}
+	if cfg.Observability.Insecure {
+		t.Error("Observability.Insecure = true, want false")
+	}
+	if cfg.Observability.LogLevel != "debug" {
+		t.Errorf("Observability.LogLevel = %q, want debug", cfg.Observability.LogLevel)
+	}
+	if cfg.Observability.MetricsPath != "/prom" {
+		t.Errorf("Observability.MetricsPath = %q, want /prom", cfg.Observability.MetricsPath)
+	}
+	if cfg.Observability.MetricsAddr != ":9191" {
+		t.Errorf("Observability.MetricsAddr = %q, want :9191", cfg.Observability.MetricsAddr)
 	}
 }
 
@@ -120,6 +176,9 @@ func TestLoadInvalidValuesFailEarly(t *testing.T) {
 		{"DB_PORT", "not-int", "DB_PORT"},
 		{"UPLOAD_MAX_SIZE_BYTES", "not-int64", "UPLOAD_MAX_SIZE_BYTES"},
 		{"S3_USE_SSL", "not-bool", "S3_USE_SSL"},
+		{"OTEL_ENABLED", "not-bool", "OTEL_ENABLED"},
+		{"OTEL_EXPORTER_OTLP_INSECURE", "not-bool", "OTEL_EXPORTER_OTLP_INSECURE"},
+		{"LOG_LEVEL", "trace", "LOG_LEVEL"},
 	}
 
 	for _, tc := range cases {
@@ -131,6 +190,9 @@ func TestLoadInvalidValuesFailEarly(t *testing.T) {
 				"DB_PORT",
 				"UPLOAD_MAX_SIZE_BYTES",
 				"S3_USE_SSL",
+				"OTEL_ENABLED",
+				"OTEL_EXPORTER_OTLP_INSECURE",
+				"LOG_LEVEL",
 			)
 			t.Setenv(tc.key, tc.value)
 
@@ -152,6 +214,14 @@ func TestValidateErrors(t *testing.T) {
 		S3:       S3Config{Endpoint: "e", Bucket: "b"},
 		RabbitMQ: RabbitMQConfig{URL: "amqp://x", Exchange: "ex"},
 		Upload:   UploadConfig{MaxSizeBytes: 1},
+		Observability: ObservabilityConfig{
+			Enabled:      true,
+			ServiceName:  "gophprofile-server",
+			OTLPEndpoint: "jaeger:4317",
+			Insecure:     true,
+			LogLevel:     "info",
+			MetricsPath:  "/metrics",
+		},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("valid config: %v", err)
@@ -166,6 +236,10 @@ func TestValidateErrors(t *testing.T) {
 		{"s3", func(c *Config) { c.S3.Bucket = "" }},
 		{"rabbit", func(c *Config) { c.RabbitMQ.URL = "" }},
 		{"upload", func(c *Config) { c.Upload.MaxSizeBytes = 0 }},
+		{"service", func(c *Config) { c.Observability.ServiceName = "" }},
+		{"metrics", func(c *Config) { c.Observability.MetricsPath = "" }},
+		{"loglevel", func(c *Config) { c.Observability.LogLevel = "fatal" }},
+		{"otlp", func(c *Config) { c.Observability.OTLPEndpoint = "" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

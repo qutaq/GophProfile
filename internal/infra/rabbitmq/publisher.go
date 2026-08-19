@@ -8,17 +8,22 @@ import (
 
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/qutaq/GophProfile/internal/events"
+	"github.com/qutaq/GophProfile/internal/observability"
 )
 
 type Publisher struct {
 	conn     *amqp.Connection
 	ch       *amqp.Channel
 	exchange string
+	metrics  *observability.Metrics
 }
 
-func NewPublisher(cfg Config) (*Publisher, error) {
+func NewPublisher(cfg Config, metrics *observability.Metrics) (*Publisher, error) {
 	conn, err := amqp.Dial(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("dial rabbitmq: %w", err)
@@ -36,7 +41,7 @@ func NewPublisher(cfg Config) (*Publisher, error) {
 		return nil, err
 	}
 
-	return &Publisher{conn: conn, ch: ch, exchange: cfg.Exchange}, nil
+	return &Publisher{conn: conn, ch: ch, exchange: cfg.Exchange, metrics: metrics}, nil
 }
 
 type Config struct {
@@ -71,12 +76,25 @@ func (p *Publisher) publish(ctx context.Context, routingKey, messageKey string, 
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
+	ctx, span := observability.StartSpanKind(ctx, "rabbitmq.publish", trace.SpanKindProducer,
+		attribute.String("messaging.system", "rabbitmq"),
+		attribute.String("messaging.destination", routingKey),
+		attribute.String("messaging.operation", "publish"),
+	)
+	defer span.End()
+
 	msgID := uuid.NewString()
+	headers := amqp.Table{
+		"x-message-key": messageKey,
+	}
+	otel.GetTextMapPropagator().Inject(ctx, amqpHeaderCarrier(headers))
+
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
+				observability.RecordError(span, ctx.Err())
 				return ctx.Err()
 			case <-time.After(time.Duration(1<<uint(attempt-1)) * 100 * time.Millisecond):
 			}
@@ -94,17 +112,18 @@ func (p *Publisher) publish(ctx context.Context, routingKey, messageKey string, 
 				Timestamp:    time.Now().UTC(),
 				Type:         routingKey,
 				Body:         payload,
-				Headers: amqp.Table{
-					"x-message-key": messageKey,
-				},
+				Headers:      headers,
 			},
 		)
 		if err == nil {
+			p.metrics.ObservePublish(routingKey)
 			return nil
 		}
 		lastErr = err
 	}
-	return fmt.Errorf("publish %s: %w", routingKey, lastErr)
+	err = fmt.Errorf("publish %s: %w", routingKey, lastErr)
+	observability.RecordError(span, err)
+	return err
 }
 
 func declareTopology(ch *amqp.Channel, exchange string) error {
