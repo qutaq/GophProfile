@@ -190,6 +190,8 @@ func TestNilMetricsMethodsDoNotPanic(t *testing.T) {
 
 func TestSkipHTTPMetrics(t *testing.T) {
 	require.True(t, skipHTTPMetrics("/metrics", "/metrics"))
+	require.True(t, skipHTTPMetrics("/livez", "/metrics"))
+	require.True(t, skipHTTPMetrics("/readyz", "/metrics"))
 	require.True(t, skipHTTPMetrics("/web/static/app.css", "/metrics"))
 	require.False(t, skipHTTPMetrics("/health", "/metrics"))
 	require.False(t, skipHTTPMetrics("/api/v1/avatars", "/metrics"))
@@ -221,12 +223,28 @@ func TestCollectStorageBytesQueryError(t *testing.T) {
 }
 
 func TestNewMetricsServer(t *testing.T) {
-	srv := NewMetricsServer("127.0.0.1:0", "/metrics", NewMetrics(nil))
+	readyErr := errors.New("rabbitmq down")
+	ready := func() error { return readyErr }
+	srv := NewMetricsServer("127.0.0.1:0", "/metrics", NewMetrics(nil), ready)
 	require.NotNil(t, srv)
+
 	rec := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "go_goroutines")
+
+	rec = httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	readyErr = nil
+	rec = httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestHTTPMiddlewareIncludesRouteStatusAndTrace(t *testing.T) {

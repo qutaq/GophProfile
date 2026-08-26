@@ -56,6 +56,16 @@ type healthResponse struct {
 	Components map[string]componentStatus `json:"components"`
 }
 
+// Live reports process liveness without checking dependencies.
+func (h *HealthHandler) Live(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// Ready reports whether the process can serve traffic (alias of Health).
+func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
+	h.Health(w, r)
+}
+
 func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()

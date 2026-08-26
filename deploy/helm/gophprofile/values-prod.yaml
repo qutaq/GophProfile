@@ -1,0 +1,66 @@
+# Production-oriented overrides. Do not put real secrets in git.
+# Pass them via --set, -f secrets.yaml, or existingSecret.
+
+image:
+  pullPolicy: IfNotPresent
+
+config:
+  APP_ENV: production
+  OTEL_ENABLED: "true"
+  LOG_LEVEL: info
+  DB_SSLMODE: require
+
+secrets:
+  DB_PASSWORD: ""
+  S3_ACCESS_KEY: ""
+  S3_SECRET_KEY: ""
+  RABBITMQ_URL: ""
+
+# existingSecret: gophprofile-secrets
+
+server:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+worker:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: avatars.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  tls: []
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+networkPolicy:
+  enabled: true

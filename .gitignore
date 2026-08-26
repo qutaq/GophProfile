@@ -8,6 +8,7 @@ vendor/
 *.out
 coverage.out
 .env
+deploy/helm/gophprofile/secrets.yaml
 .idea/
 .vscode/
 *.swp

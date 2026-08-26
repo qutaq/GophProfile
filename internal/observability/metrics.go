@@ -172,12 +172,28 @@ func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
 }
 
-func NewMetricsServer(addr, path string, m *Metrics) *http.Server {
+func NewMetricsServer(addr, path string, m *Metrics, ready func() error) *http.Server {
 	if path == "" {
 		path = "/metrics"
 	}
 	mux := http.NewServeMux()
 	mux.Handle(path, m.Handler())
+	mux.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if ready != nil {
+			if err := ready(); err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
+	})
 	return &http.Server{
 		Addr:              addr,
 		Handler:           mux,

@@ -85,7 +85,7 @@ func main() {
 
 	g, ctx := errgroup.WithContext(ctx)
 	if cfg.Observability.MetricsAddr != "" {
-		metricsSrv := observability.NewMetricsServer(cfg.Observability.MetricsAddr, cfg.Observability.MetricsPath, metrics)
+		metricsSrv := observability.NewMetricsServer(cfg.Observability.MetricsAddr, cfg.Observability.MetricsPath, metrics, consumer.Ready)
 		g.Go(func() error {
 			logger.Info("worker metrics listening", "addr", cfg.Observability.MetricsAddr)
 			err := metricsSrv.ListenAndServe()

@@ -9,6 +9,35 @@ import (
 	"github.com/qutaq/GophProfile/internal/handlers"
 )
 
+func TestLiveOKWithoutDeps(t *testing.T) {
+	h := handlers.NewHealthHandler(handlers.HealthDeps{})
+	req := httptest.NewRequest(http.MethodGet, "/livez", nil)
+	rec := httptest.NewRecorder()
+	h.Live(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "ok" {
+		t.Fatalf("body status = %#v", body["status"])
+	}
+}
+
+func TestReadyDegradedWithoutDeps(t *testing.T) {
+	h := handlers.NewHealthHandler(handlers.HealthDeps{})
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	h.Ready(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
 func TestHealthDegradedWithoutDeps(t *testing.T) {
 	h := handlers.NewHealthHandler(handlers.HealthDeps{})
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)

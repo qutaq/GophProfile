@@ -133,7 +133,8 @@ func main() {
 
 	<-runCtx.Done()
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Leave headroom after kubelet preStop (sleep 5s) within terminationGracePeriodSeconds: 30.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("shutdown", "err", err)
