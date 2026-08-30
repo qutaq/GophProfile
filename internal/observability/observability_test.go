@@ -224,8 +224,10 @@ func TestCollectStorageBytesQueryError(t *testing.T) {
 
 func TestNewMetricsServer(t *testing.T) {
 	readyErr := errors.New("rabbitmq down")
+	liveErr := errors.New("not alive")
 	ready := func() error { return readyErr }
-	srv := NewMetricsServer("127.0.0.1:0", "/metrics", NewMetrics(nil), ready)
+	live := func() error { return liveErr }
+	srv := NewMetricsServer("127.0.0.1:0", "/metrics", NewMetrics(nil), WithReadyCheck(ready), WithLiveCheck(live))
 	require.NotNil(t, srv)
 
 	rec := httptest.NewRecorder()
@@ -233,6 +235,11 @@ func TestNewMetricsServer(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "go_goroutines")
 
+	rec = httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	liveErr = nil
 	rec = httptest.NewRecorder()
 	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/livez", nil))
 	require.Equal(t, http.StatusOK, rec.Code)

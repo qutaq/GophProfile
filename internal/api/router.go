@@ -50,7 +50,7 @@ func NewRouter(h Handlers) http.Handler {
 	r.Handle(metricsPath, h.Metrics.Handler())
 
 	r.Get("/livez", h.Health.Live)
-	r.Get("/readyz", h.Health.Ready)
+	r.Get("/readyz", h.Health.Health)
 	r.Get("/health", h.Health.Health)
 
 	r.Route("/api/v1", func(r chi.Router) {

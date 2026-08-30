@@ -172,33 +172,65 @@ func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
 }
 
-func NewMetricsServer(addr, path string, m *Metrics, ready func() error) *http.Server {
+type metricsServerConfig struct {
+	live  func() error
+	ready func() error
+}
+
+// MetricsServerOption configures optional probe checks for NewMetricsServer.
+type MetricsServerOption func(*metricsServerConfig)
+
+// WithLiveCheck sets the /livez probe. A nil or omitted check always succeeds.
+func WithLiveCheck(fn func() error) MetricsServerOption {
+	return func(c *metricsServerConfig) {
+		c.live = fn
+	}
+}
+
+// WithReadyCheck sets the /readyz probe. A nil or omitted check always succeeds.
+func WithReadyCheck(fn func() error) MetricsServerOption {
+	return func(c *metricsServerConfig) {
+		c.ready = fn
+	}
+}
+
+func NewMetricsServer(addr, path string, m *Metrics, opts ...MetricsServerOption) *http.Server {
 	if path == "" {
 		path = "/metrics"
+	}
+	cfg := metricsServerConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 	mux := http.NewServeMux()
 	mux.Handle(path, m.Handler())
 	mux.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
+		writeProbe(w, cfg.live)
 	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
-		if ready != nil {
-			if err := ready(); err != nil {
-				http.Error(w, err.Error(), http.StatusServiceUnavailable)
-				return
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
+		writeProbe(w, cfg.ready)
 	})
 	return &http.Server{
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+}
+
+func writeProbe(w http.ResponseWriter, check func() error) {
+	if check != nil {
+		if err := check(); err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+	}
+	writeOK(w)
+}
+
+func writeOK(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("{\"status\":\"ok\"}\n"))
 }
 
 func (m *Metrics) HTTPInFlightInc() {

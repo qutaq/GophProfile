@@ -27,17 +27,6 @@ func TestLiveOKWithoutDeps(t *testing.T) {
 	}
 }
 
-func TestReadyDegradedWithoutDeps(t *testing.T) {
-	h := handlers.NewHealthHandler(handlers.HealthDeps{})
-	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
-	rec := httptest.NewRecorder()
-	h.Ready(rec, req)
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rec.Code)
-	}
-}
-
 func TestHealthDegradedWithoutDeps(t *testing.T) {
 	h := handlers.NewHealthHandler(handlers.HealthDeps{})
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
