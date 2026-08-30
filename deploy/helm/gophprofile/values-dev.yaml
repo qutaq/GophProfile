@@ -1,0 +1,87 @@
+# Local / kind values. Infra is expected in namespace gophprofile-infra
+# (see deploy/k8s/). Not for production.
+
+image:
+  repository: gophprofile
+  tag: latest
+  pullPolicy: IfNotPresent
+
+config:
+  APP_ENV: development
+  OTEL_ENABLED: "false"
+  OTEL_EXPORTER_OTLP_ENDPOINT: jaeger.gophprofile-infra.svc.cluster.local:4317
+  DB_HOST: postgres.gophprofile-infra.svc.cluster.local
+  S3_ENDPOINT: minio.gophprofile-infra.svc.cluster.local:9000
+  LOG_LEVEL: debug
+
+secrets:
+  DB_PASSWORD: gophprofile
+  S3_ACCESS_KEY: minioadmin
+  S3_SECRET_KEY: minioadmin
+  RABBITMQ_URL: amqp://gophprofile:gophprofile@rabbitmq.gophprofile-infra.svc.cluster.local:5672/
+
+server:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+worker:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: gophprofile.local
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+serviceMonitor:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  egress:
+    postgres:
+      enabled: true
+      port: 5432
+      podLabels:
+        app: postgres
+      namespaceLabels:
+        kubernetes.io/metadata.name: gophprofile-infra
+    minio:
+      enabled: true
+      port: 9000
+      podLabels:
+        app: minio
+      namespaceLabels:
+        kubernetes.io/metadata.name: gophprofile-infra
+    rabbitmq:
+      enabled: true
+      port: 5672
+      podLabels:
+        app: rabbitmq
+      namespaceLabels:
+        kubernetes.io/metadata.name: gophprofile-infra
+    otlp:
+      enabled: false
+      port: 4317
+      podLabels:
+        app: jaeger
+      namespaceLabels:
+        kubernetes.io/metadata.name: gophprofile-infra

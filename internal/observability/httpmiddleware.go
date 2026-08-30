@@ -12,7 +12,7 @@ import (
 
 // HTTPMiddleware records Prometheus HTTP metrics and writes a JSON access log
 // with a single WrapResponseWriter and one next.ServeHTTP call.
-// /metrics and /web/static are skipped.
+// /metrics, /livez, /readyz and /web/static are skipped.
 func HTTPMiddleware(logger *slog.Logger, metricsPath string, metrics *Metrics) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -61,7 +61,7 @@ func HTTPMiddleware(logger *slog.Logger, metricsPath string, metrics *Metrics) f
 }
 
 func skipHTTPMetrics(path, metricsPath string) bool {
-	return path == metricsPath || strings.HasPrefix(path, "/web/static")
+	return path == metricsPath || path == "/livez" || path == "/readyz" || strings.HasPrefix(path, "/web/static")
 }
 
 func routePattern(r *http.Request) string {

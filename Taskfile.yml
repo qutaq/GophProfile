@@ -135,3 +135,15 @@ tasks:
         {{if eq OS "windows"}}powershell -Command "Start-Sleep -Seconds 8"{{else}}sleep 8{{end}}
       - task: migrate
       - task: check
+
+  helm:lint:
+    desc: Lint the GophProfile Helm chart
+    cmds:
+      - helm lint deploy/helm/gophprofile
+      - helm lint deploy/helm/gophprofile -f deploy/helm/gophprofile/values-dev.yaml
+      - helm lint deploy/helm/gophprofile -f deploy/helm/gophprofile/values-prod.yaml
+
+  helm:template:
+    desc: Render Helm manifests for the dev values
+    cmds:
+      - helm template gophprofile deploy/helm/gophprofile -n gophprofile -f deploy/helm/gophprofile/values-dev.yaml

@@ -40,7 +40,7 @@ func NewRouter(h Handlers) http.Handler {
 		otelchi.WithRequestMethodInSpanName(true),
 		otelchi.WithFilter(func(req *http.Request) bool {
 			path := req.URL.Path
-			return path != "/health" && path != metricsPath
+			return path != "/health" && path != "/livez" && path != "/readyz" && path != metricsPath
 		}),
 	))
 	r.Use(withUserIDSpan)
@@ -49,6 +49,8 @@ func NewRouter(h Handlers) http.Handler {
 
 	r.Handle(metricsPath, h.Metrics.Handler())
 
+	r.Get("/livez", h.Health.Live)
+	r.Get("/readyz", h.Health.Health)
 	r.Get("/health", h.Health.Health)
 
 	r.Route("/api/v1", func(r chi.Router) {

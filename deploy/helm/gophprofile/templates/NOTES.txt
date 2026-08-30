@@ -1,0 +1,25 @@
+1. Apply optional local infra (Postgres, MinIO, RabbitMQ) if they are not already running:
+
+   kubectl apply -f deploy/k8s/namespace.yaml
+   kubectl apply -n gophprofile -f deploy/k8s/infra/
+
+2. Install the chart (dev example):
+
+   helm upgrade --install {{ .Release.Name }} deploy/helm/gophprofile \
+     -n {{ .Release.Namespace }} \
+     -f deploy/helm/gophprofile/values-dev.yaml
+
+3. Check the HTTP API:
+
+{{- if .Values.ingress.enabled }}
+   curl http://{{ .Values.ingress.host }}/health
+   curl http://{{ .Values.ingress.host }}/livez
+{{- else }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "gophprofile.fullname" . }}-server 8080:{{ .Values.server.service.port }}
+   curl http://127.0.0.1:8080/health
+{{- end }}
+
+4. Worker metrics:
+
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "gophprofile.fullname" . }}-worker 9091:{{ .Values.worker.service.port }}
+   curl http://127.0.0.1:9091/metrics

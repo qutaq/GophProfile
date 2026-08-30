@@ -87,8 +87,18 @@ func prepareWebDir(t *testing.T) string {
 func TestNewRouterWithoutWeb(t *testing.T) {
 	r := api.NewRouter(newTestHandlers(t, ""))
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/livez", nil)
 	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
@@ -180,12 +190,12 @@ func TestRouterTracesAPIAndSkipsHealthMetrics(t *testing.T) {
 	require.Equal(t, httpSpan.SpanContext().TraceID(), listSpan.SpanContext().TraceID())
 
 	before := len(recorder.Ended())
-	for _, path := range []string{"/health", "/metrics"} {
+	for _, path := range []string{"/health", "/livez", "/readyz", "/metrics"} {
 		req = httptest.NewRequest(http.MethodGet, path, nil)
 		rec = httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
 	}
-	require.Equal(t, before, len(recorder.Ended()), "health and metrics must not create spans")
+	require.Equal(t, before, len(recorder.Ended()), "probes and metrics must not create spans")
 }
 
 func TestRouterHTTPMetrics(t *testing.T) {

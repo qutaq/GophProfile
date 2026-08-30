@@ -56,6 +56,20 @@ func NewConsumer(cfg Config, logger *slog.Logger, metrics *observability.Metrics
 	return &Consumer{conn: conn, ch: ch, exchange: cfg.Exchange, log: logger, metrics: metrics}, nil
 }
 
+// Ready reports whether the consumer connection and channel are usable.
+func (c *Consumer) Ready() error {
+	if c == nil || c.conn == nil {
+		return fmt.Errorf("rabbitmq connection is not initialized")
+	}
+	if c.conn.IsClosed() {
+		return fmt.Errorf("rabbitmq connection is closed")
+	}
+	if c.ch == nil || c.ch.IsClosed() {
+		return fmt.Errorf("rabbitmq channel is closed")
+	}
+	return nil
+}
+
 func (c *Consumer) Close() error {
 	var err error
 	if c.ch != nil {

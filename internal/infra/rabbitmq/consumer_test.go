@@ -12,6 +12,17 @@ import (
 	"github.com/qutaq/GophProfile/internal/observability"
 )
 
+func TestConsumerReadyNil(t *testing.T) {
+	var c *Consumer
+	if err := c.Ready(); err == nil {
+		t.Fatal("expected error for nil consumer")
+	}
+	c = &Consumer{}
+	if err := c.Ready(); err == nil {
+		t.Fatal("expected error for uninitialized connection")
+	}
+}
+
 func TestRetryWithBackoffSuccessAfterFailures(t *testing.T) {
 	attempts := 0
 	err := retryWithBackoff(context.Background(), nil, 4, func() error {

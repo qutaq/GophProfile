@@ -1,0 +1,383 @@
+openapi: 3.0.3
+info:
+  title: GophProfile API
+  description: HTTP API for user avatar upload, retrieval, metadata and deletion.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local Docker Compose / binary
+  - url: http://gophprofile.local
+    description: Kubernetes Ingress (values-dev)
+
+tags:
+  - name: probes
+  - name: avatars
+  - name: users
+
+paths:
+  /livez:
+    get:
+      tags: [probes]
+      summary: Liveness probe (process is up, no dependency checks)
+      operationId: livez
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveStatus"
+
+  /readyz:
+    get:
+      tags: [probes]
+      summary: Readiness probe (Postgres, MinIO, RabbitMQ)
+      operationId: readyz
+      responses:
+        "200":
+          description: Ready to serve traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: One or more dependencies are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /health:
+    get:
+      tags: [probes]
+      summary: Health check (alias of /readyz)
+      operationId: health
+      responses:
+        "200":
+          description: All dependencies are healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Degraded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /metrics:
+    get:
+      tags: [probes]
+      summary: Prometheus metrics
+      operationId: metrics
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/v1/avatars:
+    post:
+      tags: [avatars]
+      summary: Upload an avatar
+      operationId: uploadAvatar
+      parameters:
+        - $ref: "#/components/parameters/UserIDHeader"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: JPEG, PNG or WebP, max 10 MiB by default
+      responses:
+        "201":
+          description: Avatar accepted and queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/avatars/{avatar_id}:
+    get:
+      tags: [avatars]
+      summary: Download an avatar image
+      operationId: getAvatar
+      parameters:
+        - $ref: "#/components/parameters/AvatarID"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Image bytes
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [avatars]
+      summary: Soft-delete an avatar (owner only)
+      operationId: deleteAvatar
+      parameters:
+        - $ref: "#/components/parameters/UserIDHeader"
+        - $ref: "#/components/parameters/AvatarID"
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/avatars/{avatar_id}/metadata:
+    get:
+      tags: [avatars]
+      summary: Avatar metadata
+      operationId: getAvatarMetadata
+      parameters:
+        - $ref: "#/components/parameters/AvatarID"
+      responses:
+        "200":
+          description: Metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetadataResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/users/{user_id}/avatar:
+    get:
+      tags: [users]
+      summary: Download the current avatar of a user
+      operationId: getUserAvatar
+      parameters:
+        - $ref: "#/components/parameters/UserIDPath"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Image bytes
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [users]
+      summary: Delete the current avatar of a user (owner only)
+      operationId: deleteUserAvatar
+      parameters:
+        - $ref: "#/components/parameters/UserIDHeader"
+        - $ref: "#/components/parameters/UserIDPath"
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/users/{user_id}/avatars:
+    get:
+      tags: [users]
+      summary: List avatars of a user
+      operationId: listUserAvatars
+      parameters:
+        - $ref: "#/components/parameters/UserIDPath"
+      responses:
+        "200":
+          description: List of avatars
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AvatarListItem"
+
+components:
+  parameters:
+    UserIDHeader:
+      name: X-User-ID
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Acting user id
+    AvatarID:
+      name: avatar_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserIDPath:
+      name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+    Size:
+      name: size
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [original, 100x100, 300x300]
+      description: Thumbnail size; omit or original for the source image
+
+  responses:
+    Error:
+      description: Error payload
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    LiveStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    HealthStatus:
+      type: object
+      required: [status, components]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        components:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/ComponentStatus"
+    ComponentStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+        error:
+          type: string
+        latency:
+          type: string
+          example: 1.2ms
+    UploadResponse:
+      type: object
+      required: [id, user_id, url, status, created_at]
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        url:
+          type: string
+          example: /api/v1/avatars/11111111-1111-1111-1111-111111111111
+        status:
+          type: string
+          example: pending
+        created_at:
+          type: string
+          format: date-time
+    MetadataResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        file_name:
+          type: string
+        mime_type:
+          type: string
+        size:
+          type: integer
+          format: int64
+        thumbnails:
+          type: array
+          items:
+            $ref: "#/components/schemas/ThumbnailItem"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        status:
+          type: object
+          additionalProperties:
+            type: string
+    ThumbnailItem:
+      type: object
+      properties:
+        size:
+          type: string
+          example: 100x100
+        url:
+          type: string
+    AvatarListItem:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        url:
+          type: string
+        file_name:
+          type: string
+        mime_type:
+          type: string
+        size:
+          type: integer
+          format: int64
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+        max_size:
+          type: integer
+          format: int64

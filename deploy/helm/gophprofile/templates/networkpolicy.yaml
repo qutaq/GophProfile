@@ -1,0 +1,94 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "gophprofile.fullname" . }}-server
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.namespaceLabels | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.server.service.targetPort }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.prometheus.namespaceLabels | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.server.service.targetPort }}
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- $np := .Values.networkPolicy.egress }}
+    {{- if $np.postgres.enabled }}
+    {{- include "gophprofile.netpolEgress" $np.postgres | nindent 4 }}
+    {{- end }}
+    {{- if $np.minio.enabled }}
+    {{- include "gophprofile.netpolEgress" $np.minio | nindent 4 }}
+    {{- end }}
+    {{- if $np.rabbitmq.enabled }}
+    {{- include "gophprofile.netpolEgress" $np.rabbitmq | nindent 4 }}
+    {{- end }}
+    {{- if $np.otlp.enabled }}
+    {{- include "gophprofile.netpolEgress" $np.otlp | nindent 4 }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "gophprofile.fullname" . }}-worker
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.prometheus.namespaceLabels | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.worker.service.port }}
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- $np := .Values.networkPolicy.egress }}
+    {{- if $np.postgres.enabled }}
+    {{- include "gophprofile.netpolEgress" $np.postgres | nindent 4 }}
+    {{- end }}
+    {{- if $np.minio.enabled }}
+    {{- include "gophprofile.netpolEgress" $np.minio | nindent 4 }}
+    {{- end }}
+    {{- if $np.rabbitmq.enabled }}
+    {{- include "gophprofile.netpolEgress" $np.rabbitmq | nindent 4 }}
+    {{- end }}
+    {{- if $np.otlp.enabled }}
+    {{- include "gophprofile.netpolEgress" $np.otlp | nindent 4 }}
+    {{- end }}
+{{- end }}

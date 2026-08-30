@@ -56,6 +56,11 @@ type healthResponse struct {
 	Components map[string]componentStatus `json:"components"`
 }
 
+// Live reports process liveness without checking dependencies.
+func (h *HealthHandler) Live(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
